@@ -1,0 +1,17 @@
+{
+  "name": "hostpilot-saas",
+  "version": "2.1.2",
+  "description": "HostPilot \u2014 SaaS short-term rental automation (source package)",
+  "main": "src/api.js",
+  "scripts": {
+    "start": "node src/api.js",
+    "dev": "node --watch src/api.js",
+    "check": "node --check src/api.js",
+    "test": "node scripts/smoke-test.js",
+    "backup": "bash scripts/backup-db.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}

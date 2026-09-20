@@ -1,0 +1,482 @@
+{
+  "users": [
+    {
+      "id": "bb26de4e2b7340466ea0596d",
+      "email": "buyer_a_1789808674905@test.local",
+      "password_hash": "scrypt:c6af383fca0da36262e110d10ee770bd:d6108396b3f3573fea8625aac58efb32ec2216f35f63a0d16cc760739072658e78082f8d159c63870dc4e6495134bdd9f343f541d95e1e7762c8f1a1d547298e",
+      "first_name": "BuyerA",
+      "last_name": "",
+      "phone": null,
+      "role": "owner",
+      "status": "active",
+      "last_login_at": "2026-09-19T09:04:34.983Z",
+      "created_at": "2026-09-19T09:04:34.983Z",
+      "updated_at": "2026-09-19T09:04:34.983Z"
+    },
+    {
+      "id": "d9e07c5cc7096642276aa33c",
+      "email": "buyer_b_1789808674905@test.local",
+      "password_hash": "scrypt:619b5fa82f19c6da8091bf9a0f65a62f:6cda5957fd47e797b75866fc25d1d2231068c1da1cef5b36eca5b7e245ea48994aa6d26c1c9f047f992758f46dc501ad07b1eb81ec9cfa7b0ed63cc206453758",
+      "first_name": "BuyerB",
+      "last_name": "",
+      "phone": null,
+      "role": "owner",
+      "status": "active",
+      "last_login_at": "2026-09-19T09:04:37.181Z",
+      "created_at": "2026-09-19T09:04:37.181Z",
+      "updated_at": "2026-09-19T09:04:37.181Z"
+    }
+  ],
+  "organizations": [
+    {
+      "id": "61d8e8758428e14d6f7127ad",
+      "name": "OrgA",
+      "owner_id": "bb26de4e2b7340466ea0596d",
+      "plan": "starter",
+      "subscription_status": "trialing",
+      "created_at": "2026-09-19T09:04:34.983Z",
+      "updated_at": "2026-09-19T09:04:34.983Z"
+    },
+    {
+      "id": "71376622afd3a5bf1c2653d5",
+      "name": "OrgB",
+      "owner_id": "d9e07c5cc7096642276aa33c",
+      "plan": "starter",
+      "subscription_status": "trialing",
+      "created_at": "2026-09-19T09:04:37.181Z",
+      "updated_at": "2026-09-19T09:04:37.181Z"
+    }
+  ],
+  "organization_members": [
+    {
+      "id": "3c7e0d0b8d96fe557058cf63",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "role": "owner",
+      "created_at": "2026-09-19T09:04:34.983Z"
+    },
+    {
+      "id": "ccd96c160392ee04601c0118",
+      "organization_id": "71376622afd3a5bf1c2653d5",
+      "user_id": "d9e07c5cc7096642276aa33c",
+      "role": "owner",
+      "created_at": "2026-09-19T09:04:37.181Z"
+    }
+  ],
+  "properties": [
+    {
+      "id": "74e8c95c5ec5042807df5591",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "name": "PropA",
+      "description": null,
+      "address": "1 rue Test",
+      "city": null,
+      "postal_code": null,
+      "country": "FR",
+      "checkin_time": "15h00",
+      "checkout_time": "11h00",
+      "wifi_name": null,
+      "wifi_password": null,
+      "entry_code": null,
+      "parking_information": null,
+      "house_rules": null,
+      "status": "active",
+      "created_at": "2026-09-19T09:04:39.432Z",
+      "updated_at": "2026-09-19T09:04:39.433Z"
+    }
+  ],
+  "property_knowledge": [],
+  "guests": [
+    {
+      "id": "8fc8a285081c5db11a67c694",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "first_name": "Guest",
+      "last_name": "",
+      "email": null,
+      "phone": null,
+      "country": null,
+      "created_at": "2026-09-19T09:04:41.261Z",
+      "updated_at": "2026-09-19T09:04:41.261Z"
+    }
+  ],
+  "reservations": [
+    {
+      "id": "9bf3a7bc0d822cbe87136c39",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "property_id": "74e8c95c5ec5042807df5591",
+      "guest_id": "8fc8a285081c5db11a67c694",
+      "external_id": null,
+      "platform": "direct",
+      "check_in": "2028-01-10",
+      "check_out": "2028-01-12",
+      "number_of_guests": 1,
+      "status": "completed",
+      "total_amount": 100,
+      "currency": "EUR",
+      "checkin_token_hash": "6ea3ed51b54fc355b083fa558c3c68e0e9552628fd7fbb9b474194df37a0fe4a",
+      "checkin_status": "pending",
+      "created_at": "2026-09-19T09:04:41.261Z",
+      "updated_at": "2026-09-19T09:04:47.100Z",
+      "checkout_confirmed_at": "2026-09-19T09:04:47.100Z"
+    }
+  ],
+  "conversations": [
+    {
+      "id": "d0ec9be3890806b62712b5da",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "property_id": "74e8c95c5ec5042807df5591",
+      "reservation_id": "9bf3a7bc0d822cbe87136c39",
+      "guest_id": "8fc8a285081c5db11a67c694",
+      "status": "open",
+      "ai_enabled": 1,
+      "human_controlled": 0,
+      "created_at": "2026-09-19T09:04:41.261Z",
+      "updated_at": "2026-09-19T09:04:41.261Z"
+    }
+  ],
+  "messages": [
+    {
+      "id": "91afc80713c34fae83680ba0",
+      "conversation_id": "d0ec9be3890806b62712b5da",
+      "sender_type": "ai",
+      "content": "Bonjour Guest, bienvenue chez PropA ! Check-in le 2028-01-10 à 15h00.",
+      "channel": "internal",
+      "read_at": null,
+      "created_at": "2026-09-19T09:04:42.310Z"
+    }
+  ],
+  "cleaning_tasks": [
+    {
+      "id": "2d74d89de3744bbce04d2f0b",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "property_id": "74e8c95c5ec5042807df5591",
+      "reservation_id": "9bf3a7bc0d822cbe87136c39",
+      "assigned_to": null,
+      "scheduled_at": "2026-09-19T09:04:47.100Z",
+      "started_at": null,
+      "completed_at": null,
+      "status": "pending",
+      "notes": null,
+      "created_at": "2026-09-19T09:04:47.100Z",
+      "updated_at": "2026-09-19T09:04:47.100Z"
+    }
+  ],
+  "cleaning_checklists": [
+    {
+      "id": "689f773bd82585c9eabe665d",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Cuisine",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "b8e43ed6a7251b04e1332be2",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Salle de bain",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "3d43a3ec4e2f904f1e302e39",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Sols",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "5846052d214d91dff8f8acbc",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Lits",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "aa9a7984e6117a57a6335a05",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Serviettes",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "1526dc69bc32d68064a7a6e5",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Poubelles",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "7f775e02847ca0d4c4484078",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Équipements",
+      "completed": 0,
+      "completed_at": null
+    },
+    {
+      "id": "1c19975a4ed0eb7c46a52210",
+      "cleaning_task_id": "2d74d89de3744bbce04d2f0b",
+      "title": "Contrôle final",
+      "completed": 0,
+      "completed_at": null
+    }
+  ],
+  "incidents": [],
+  "automations": [
+    {
+      "id": "c19241f56f07268761dd2a27",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "name": "Bienvenue nouvelle réservation",
+      "description": "",
+      "enabled": 1,
+      "event_type": "RESERVATION_CREATED",
+      "conditions_json": null,
+      "actions_json": "[{\"type\":\"notify\",\"title\":\"Nouvelle réservation\",\"message\":\"{{guest_first_name}} — {{property_name}}\"},{\"type\":\"generate_checkin_link\"},{\"type\":\"send_message\",\"template\":\"Bonjour {{guest_first_name}}, bienvenue chez {{property_name}} ! Check-in le {{check_in_date}} à {{check_in_time}}.\"}]",
+      "created_by": "bb26de4e2b7340466ea0596d",
+      "created_at": "2026-09-19T09:04:34.983Z",
+      "updated_at": "2026-09-19T09:04:34.983Z"
+    },
+    {
+      "id": "44e1d924f74820a0ac034b3f",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "name": "Ménage au départ",
+      "description": "",
+      "enabled": 1,
+      "event_type": "CHECK_OUT_COMPLETED",
+      "conditions_json": null,
+      "actions_json": "[{\"type\":\"create_cleaning_task\"}]",
+      "created_by": "bb26de4e2b7340466ea0596d",
+      "created_at": "2026-09-19T09:04:34.983Z",
+      "updated_at": "2026-09-19T09:04:34.983Z"
+    },
+    {
+      "id": "57cf8f24304ca53e8d8d8393",
+      "organization_id": "71376622afd3a5bf1c2653d5",
+      "name": "Bienvenue nouvelle réservation",
+      "description": "",
+      "enabled": 1,
+      "event_type": "RESERVATION_CREATED",
+      "conditions_json": null,
+      "actions_json": "[{\"type\":\"notify\",\"title\":\"Nouvelle réservation\",\"message\":\"{{guest_first_name}} — {{property_name}}\"},{\"type\":\"generate_checkin_link\"},{\"type\":\"send_message\",\"template\":\"Bonjour {{guest_first_name}}, bienvenue chez {{property_name}} ! Check-in le {{check_in_date}} à {{check_in_time}}.\"}]",
+      "created_by": "d9e07c5cc7096642276aa33c",
+      "created_at": "2026-09-19T09:04:37.181Z",
+      "updated_at": "2026-09-19T09:04:37.181Z"
+    },
+    {
+      "id": "a605dc12ae37ba7745c11d34",
+      "organization_id": "71376622afd3a5bf1c2653d5",
+      "name": "Ménage au départ",
+      "description": "",
+      "enabled": 1,
+      "event_type": "CHECK_OUT_COMPLETED",
+      "conditions_json": null,
+      "actions_json": "[{\"type\":\"create_cleaning_task\"}]",
+      "created_by": "d9e07c5cc7096642276aa33c",
+      "created_at": "2026-09-19T09:04:37.181Z",
+      "updated_at": "2026-09-19T09:04:37.181Z"
+    }
+  ],
+  "automation_runs": [
+    {
+      "id": "e3dcb6d9cf9d0ddeb46a6137",
+      "automation_id": "c19241f56f07268761dd2a27",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "trigger_event": "RESERVATION_CREATED",
+      "status": "completed",
+      "started_at": "2026-09-19T09:04:42.309Z",
+      "completed_at": "2026-09-19T09:04:42.310Z",
+      "error_message": null,
+      "action_results": [
+        {
+          "action_type": "notify",
+          "status": "completed",
+          "detail": "Notification: Nouvelle réservation",
+          "error": null
+        },
+        {
+          "action_type": "generate_checkin_link",
+          "status": "completed",
+          "detail": "/checkin.html?token=95a5b474054349ea2f24251a36af162677b41cd1e6c0ca49",
+          "error": null
+        },
+        {
+          "action_type": "send_message",
+          "status": "completed",
+          "detail": "Message enregistré (canal interne). Envoi Airbnb/Booking: Configuration requise si non connecté.",
+          "error": null
+        }
+      ],
+      "reservation_id": "9bf3a7bc0d822cbe87136c39",
+      "property_id": "74e8c95c5ec5042807df5591"
+    },
+    {
+      "id": "70010510a5f3520baa71f9ed",
+      "automation_id": "44e1d924f74820a0ac034b3f",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "trigger_event": "CHECK_OUT_COMPLETED",
+      "status": "completed",
+      "started_at": "2026-09-19T09:04:48.187Z",
+      "completed_at": "2026-09-19T09:04:48.187Z",
+      "error_message": null,
+      "action_results": [
+        {
+          "action_type": "create_cleaning_task",
+          "status": "completed",
+          "detail": "Tâche ménage déjà existante 2d74d89de3744bbce04d2f0b (idempotent)",
+          "error": null
+        }
+      ],
+      "reservation_id": "9bf3a7bc0d822cbe87136c39",
+      "property_id": "74e8c95c5ec5042807df5591"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "807c064defff7b48444e9586",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "type": "reservation",
+      "title": "Nouvelle réservation",
+      "message": "Guest — PropA",
+      "read_at": null,
+      "created_at": "2026-09-19T09:04:41.261Z"
+    },
+    {
+      "id": "ec7f3d6c4fa4314ef04d60ad",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "type": "automation",
+      "title": "Nouvelle réservation",
+      "message": "Guest — PropA",
+      "read_at": null,
+      "created_at": "2026-09-19T09:04:42.310Z"
+    },
+    {
+      "id": "7c6e363e0cb499a4671bcecf",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "type": "cleaning",
+      "title": "Nouvelle tâche de ménage",
+      "message": "Check-out terminé — ménage à planifier",
+      "read_at": null,
+      "created_at": "2026-09-19T09:04:47.100Z"
+    }
+  ],
+  "audit_logs": [
+    {
+      "id": "c0c36ae2012c9f041c624953",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "action": "user.register",
+      "entity_type": "user",
+      "entity_id": "bb26de4e2b7340466ea0596d",
+      "metadata": null,
+      "created_at": "2026-09-19T09:04:36.058Z"
+    },
+    {
+      "id": "49365cfc8404e35fb4f9f149",
+      "organization_id": "71376622afd3a5bf1c2653d5",
+      "user_id": "d9e07c5cc7096642276aa33c",
+      "action": "user.register",
+      "entity_type": "user",
+      "entity_id": "d9e07c5cc7096642276aa33c",
+      "metadata": null,
+      "created_at": "2026-09-19T09:04:38.343Z"
+    },
+    {
+      "id": "957e3236d2ddc2d366b407c7",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "action": "property.created",
+      "entity_type": "property",
+      "entity_id": "74e8c95c5ec5042807df5591",
+      "metadata": null,
+      "created_at": "2026-09-19T09:04:40.585Z"
+    },
+    {
+      "id": "da18044a43dbe81c714842cc",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "action": "reservation.created",
+      "entity_type": "reservation",
+      "entity_id": "9bf3a7bc0d822cbe87136c39",
+      "metadata": null,
+      "created_at": "2026-09-19T09:04:43.784Z"
+    },
+    {
+      "id": "828bc0af972c356f0a06a837",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "action": "checkin.link_generated",
+      "entity_type": "reservation",
+      "entity_id": "9bf3a7bc0d822cbe87136c39",
+      "metadata": null,
+      "created_at": "2026-09-19T09:04:46.041Z"
+    },
+    {
+      "id": "2188ff6816f262a608f025b7",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "user_id": "bb26de4e2b7340466ea0596d",
+      "action": "checkout.confirmed",
+      "entity_type": "reservation",
+      "entity_id": "9bf3a7bc0d822cbe87136c39",
+      "metadata": null,
+      "created_at": "2026-09-19T09:04:49.249Z"
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": "3c4314e5f37618295fa8815e",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "plan": "starter",
+      "status": "trialing",
+      "created_at": "2026-09-19T09:04:34.983Z",
+      "updated_at": "2026-09-19T09:04:34.983Z"
+    },
+    {
+      "id": "035ff194b9ecc78a37924c6f",
+      "organization_id": "71376622afd3a5bf1c2653d5",
+      "plan": "starter",
+      "status": "trialing",
+      "created_at": "2026-09-19T09:04:37.181Z",
+      "updated_at": "2026-09-19T09:04:37.181Z"
+    }
+  ],
+  "integrations": [],
+  "jobs": [],
+  "checkin_tokens": [
+    {
+      "id": "120c6c71a1ac4f1a6100a8e1",
+      "reservation_id": "9bf3a7bc0d822cbe87136c39",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "token_hash": "3f7fc56627a548cb30efaf79a6b9c0ec8282f8ef109926f7820e5b0f58a983f2",
+      "expires_at": "2026-10-19T09:04:42.310Z",
+      "used_at": null,
+      "confirmed_at": null,
+      "revoked_at": "2026-09-19T09:04:44.807Z",
+      "created_at": "2026-09-19T09:04:42.310Z"
+    },
+    {
+      "id": "96ff0ea7024f3131552f260d",
+      "reservation_id": "9bf3a7bc0d822cbe87136c39",
+      "organization_id": "61d8e8758428e14d6f7127ad",
+      "token_hash": "6ea3ed51b54fc355b083fa558c3c68e0e9552628fd7fbb9b474194df37a0fe4a",
+      "expires_at": "2026-10-19T09:04:44.807Z",
+      "used_at": null,
+      "confirmed_at": null,
+      "revoked_at": null,
+      "created_at": "2026-09-19T09:04:44.807Z"
+    }
+  ],
+  "cleaning_photos": [],
+  "notification_preferences": [],
+  "devices": [],
+  "stripe_events": [],
+  "pricing_history": [],
+  "review_requests": [],
+  "review_responses": [],
+  "reviews": [],
+  "onboarding_state": [],
+  "pricing_recommendations": [],
+  "pricing_rules": [],
+  "password_resets": [],
+  "notification_deliveries": []
+}

@@ -1,0 +1,83 @@
+openapi: 3.0.3
+info:
+  title: HostPilot API
+  version: 2.1.0
+  description: API multi-tenant HostPilot (auth JWT Bearer)
+servers:
+  - url: http://localhost:3001
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /api/auth/register:
+    post:
+      summary: Register user + organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, organization_name]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                first_name: { type: string }
+                organization_name: { type: string }
+      responses:
+        '200': { description: Token JWT }
+  /api/auth/login:
+    post:
+      summary: Login
+      responses:
+        '200': { description: Token JWT }
+        '401': { description: Invalid credentials }
+  /api/properties:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: List properties (tenant scoped)
+      responses:
+        '200': { description: Property list }
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create property
+      responses:
+        '200': { description: Created }
+  /api/reservations/{id}/checkout:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Confirm checkout (idempotent cleaning task)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Reservation + cleaning_task_id }
+  /api/email/test:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Test email provider
+      responses:
+        '200': { description: Sent by provider }
+        '503': { description: EMAIL_NOT_CONFIGURED }
+  /api/integrations/{platform}/sync:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Sync platform (returns PARTNER_API_REQUIRED without official API)
+      parameters:
+        - name: platform
+          in: path
+          required: true
+          schema: { type: string, enum: [airbnb, booking, vrbo] }
+      responses:
+        '503': { description: PARTNER_API_REQUIRED or missing credentials }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
