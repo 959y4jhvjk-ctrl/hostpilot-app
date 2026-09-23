@@ -1,93 +1,95 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Check-in — HostPilot</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Check-in — HostPilot</title>
+<script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
-  <div id="content" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-md w-full text-sm text-slate-700">
-    Chargement…
-  </div>
+<div id="content" class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-md w-full text-sm text-slate-700">
+Chargement…
+</div>
 <script>
 (function () {
-  function esc(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-  function el(tag, attrs, children) {
-    const n = document.createElement(tag);
-    if (attrs) Object.keys(attrs).forEach(k => {
-      if (k === 'className') n.className = attrs[k];
-      else if (k === 'text') n.textContent = attrs[k];
-      else n.setAttribute(k, attrs[k]);
-    });
-    (children || []).forEach(c => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
-    return n;
-  }
-  const API = '';
-  const params = new URLSearchParams(location.search);
-  const token = params.get('token') || '';
-  const root = document.getElementById('content');
+function esc(s) {
+return String(s == null ? '' : s)
+.replace(/&/g, '&amp;')
+.replace(/</g, '&lt;')
+.replace(/>/g, '&gt;')
+.replace(/"/g, '&quot;')
+.replace(/'/g, '&#39;');
+}
+function el(tag, attrs, children) {
+const n = document.createElement(tag);
+if (attrs) Object.keys(attrs).forEach(k => {
+if (k === 'className') n.className = attrs[k];
+else if (k === 'text') n.textContent = attrs[k];
+else n.setAttribute(k, attrs[k]);
+});
+(children || []).forEach(c => n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+return n;
+}
+const API = '';
+const params = new URLSearchParams(location.search);
+const token = params.get('token') || '';
+const root = document.getElementById('content');
 
-  async function load() {
-    root.textContent = 'Chargement…';
-    try {
-      const res = await fetch(API + '/api/checkin?token=' + encodeURIComponent(token));
-      const d = await res.json();
-      root.textContent = '';
-      if (!res.ok) {
-        root.appendChild(el('p', { className: 'text-red-600 font-medium text-center', text: d.error || 'Ce lien de check-in n\'est plus valide.' }));
-        return;
-      }
-      root.appendChild(el('p', { className: 'text-lg font-semibold text-slate-900', text: d.propertyName || '' }));
-      root.appendChild(el('p', { className: 'text-slate-500 mt-1', text: d.address || '' }));
-      const box = el('div', { className: 'mt-4 space-y-2 border-t border-slate-100 pt-4' });
-      function row(label, value) {
-        if (!value) return;
-        const p = el('p', {});
-        p.appendChild(el('span', { className: 'text-slate-400', text: label }));
-        p.appendChild(document.createElement('br'));
-        p.appendChild(el('strong', { text: value }));
-        box.appendChild(p);
-      }
-      row('Voyageur', d.guestName || '—');
-      row('Arrivée', ((d.checkIn || '') + '').slice(0, 10) + (d.checkinTime ? ' · ' + d.checkinTime : ''));
-      row('Départ', ((d.checkOut || '') + '').slice(0, 10) + (d.checkoutTime ? ' · ' + d.checkoutTime : ''));
-      row('Code d\'accès', d.accessCode || '');
-      if (d.wifiName) row('Wi-Fi', d.wifiName + (d.wifiPass ? ' · ' + d.wifiPass : ''));
-      row('Parking', d.parking || '');
-      row('Règlement', d.rules || '');
-      root.appendChild(box);
-      const foot = el('div', { className: 'mt-6' });
-      if (d.confirmed_at) {
-        foot.appendChild(el('p', { className: 'text-center text-green-600 font-medium', text: '✓ Instructions confirmées' }));
-      } else {
-        const btn = el('button', { className: 'w-full bg-sky-600 text-white font-medium py-3 rounded-xl', text: "J'ai bien reçu les instructions", id: 'btn' });
-        btn.addEventListener('click', async () => {
-          const r = await fetch(API + '/api/checkin/confirm', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
-          });
-          const j = await r.json();
-          if (!r.ok) { alert(j.error || 'Erreur'); return; }
-          load();
-        });
-        foot.appendChild(btn);
-      }
-      root.appendChild(foot);
-    } catch (e) {
-      root.textContent = '';
-      root.appendChild(el('p', { className: 'text-red-600 text-center', text: 'Impossible de joindre le serveur' }));
-    }
-  }
-  load();
+async function load() {
+root.textContent = 'Chargement…';
+try {
+const res = await fetch(API + '/api/checkin?token=' + encodeURIComponent(token));
+const d = await res.json();
+root.textContent = '';
+if (!res.ok) {
+root.appendChild(el('p', { className: 'text-red-600 font-medium text-center', text: d.error || 'Ce lien de check-in n\'est plus valide.' }));
+return;
+}
+root.appendChild(el('p', { className: 'text-lg font-semibold text-slate-900', text: d.propertyName || '' }));
+root.appendChild(el('p', { className: 'text-slate-500 mt-1', text: d.address || '' }));
+const box = el('div', { className: 'mt-4 space-y-2 border-t border-slate-100 pt-4' });
+function row(label, value) {
+if (!value) return;
+const p = el('p', {});
+p.appendChild(el('span', { className: 'text-slate-400', text: label }));
+p.appendChild(document.createElement('br'));
+p.appendChild(el('strong', { text: value }));
+box.appendChild(p);
+}
+row('Voyageur', d.guestName || '—');
+row('Arrivée', ((d.checkIn || '') + '').slice(0, 10) + (d.checkinTime ? ' · ' + d.checkinTime : ''));
+row('Départ', ((d.checkOut || '') + '').slice(0, 10) + (d.checkoutTime ? ' · ' + d.checkoutTime : ''));
+row('Code d\'accès', d.accessCode || '');
+if (d.wifiName) row('Wi-Fi', d.wifiName + (d.wifiPass ? ' · ' + d.wifiPass : ''));
+row('Parking', d.parking || '');
+row('Règlement', d.rules || '');
+root.appendChild(box);
+const foot = el('div', { className: 'mt-6' });
+if (d.confirmed_at) {
+foot.appendChild(el('p', { className: 'text-center text-green-600 font-medium', text: '✓ Instructions confirmées' }));
+} else {
+const btn = el('button', { className: 'w-full bg-sky-600 text-white font-medium py-3 rounded-xl', text: "J'ai bien reçu les instructions", id: 'btn' });
+btn.addEventListener('click', async () => {
+const r = await fetch(API + '/api/checkin/confirm', {
+method: 'POST', headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ token })
+});
+const j = await r.json();
+if (!r.ok) { alert(j.error || 'Erreur'); return; }
+load();
+});
+foot.appendChild(btn);
+}
+root.appendChild(foot);
+} catch (e) {
+root.textContent = '';
+root.appendChild(el('p', { className: 'text-red-600 text-center', text: 'Impossible de joindre le serveur' }));
+}
+}
+load();
 })();
 </script>
 </body>
 </html>
+
+
