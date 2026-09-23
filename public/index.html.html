@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HostPilot — Conciergerie automatisée</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={darkMode:'class',theme:{extend:{colors:{brand:{50:'#f0f9ff',100:'#e0f2fe',500:'#0ea5e9',600:'#0284c7',700:'#0369a1'}}}}}</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}body{font-family:Inter,system-ui,sans-serif}
+.card{background:#fff;border-radius:1rem;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.dark .card{background:#1e293b;border-color:#334155}
+.btn-p{background:#0284c7;color:#fff;font-weight:500;padding:.6rem 1.2rem;border-radius:.75rem}
+.btn-p:hover{background:#0369a1}.btn-p:disabled{opacity:.5}
+.btn-s{background:#f1f5f9;color:#1e293b;font-weight:500;padding:.6rem 1.2rem;border-radius:.75rem}
+.dark .btn-s{background:#334155;color:#f1f5f9}
+.side.active{background:#f0f9ff;color:#0369a1}
+.dark .side.active{background:rgba(3,105,161,.25);color:#7dd3fc}
+.toast{animation:slideIn .3s ease}@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+input:focus,select:focus,textarea:focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.15);outline:none}
+</style>
+</head>
+<body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden">
+<div id="root" class="h-full"></div>
+<div id="toasts" class="fixed bottom-24 lg:bottom-6 right-4 z-[100] space-y-2 max-w-sm"></div>
+<script>
+
+/** Résolution URL API — jamais de fallback silencieux vers localhost en production */
+function resolveApiBase() {
+  const host = location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '';
+  // Même origine (app servie par le backend Node) → chemins relatifs /api/*
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    if (isLocal || location.port === '3001') return { base: '', ok: true };
+    // Production: même host que la page (reverse proxy / même serveur)
+    // Override optionnel: localStorage hp_api = URL absolue du backend
+    const override = localStorage.getItem('hp_api');
+    if (override && /^https?:\/\//i.test(override)) return { base: override.replace(/\/$/, ''), ok: true };
+    // Même origine par défaut (recommandé: servir index.html depuis le backend ou un proxy)
+    return { base: '', ok: true };
+  }
+  // file:// ou contexte hors web
+  const override = localStorage.getItem('hp_api');
+  if (override && /^https?:\/\//i.test(override)) return { base: override.replace(/\/$/, ''), ok: true };
+  return { base: null, ok: false, error: 'Configuration requise : définissez localStorage.hp_api avec l\'URL HTTPS du backend (ex. https://api.votredomaine.com). Connexion silencieuse à localhost interdite hors environnement local.' };
+}
+const _apiResolved = resolveApiBase();
+const API = _apiResolved.base === null ? '' : _apiResolved.base;
+const API_CONFIG_ERROR = _apiResolved.ok ? null : (_apiResolved.error || 'Configuration API requise');
+const S = {
+  page: 'boot', dark: localStorage.getItem('hp-dark')==='1',
+  token: localStorage.getItem('hp_token')||null,
+  user:null, org:null, loading:false, error:null,
+  properties:[], reservations:[], cleaning:[], incidents:[], automations:[], automationRuns:[], jobs:[], conversations:[], messages:[], activeConv:null, notifications:[], unreadCount:0, showNotifs:false, notifPrefs:null, billing:null, plans:null, stats:null, calendar:null, systemStatus:null, dashPeriod:'month', pricing:null, reviews:null, reviewStats:null, onboarding:null, showOnboarding:false, onbStep:1, integrations:[],
+  showAddProp:false, showAddRes:false, showAddInc:false,
+  authMode:'login', authScreen:'landing',
+  authForm:{email:'',password:'',first_name:'',organization_name:''},
+  moreOpen:false
+};
+
+
+async function loadDemo(){
+  try{
+    const d=await fetch('/api/demo/reset',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json());
+    if(!d.ok&&!d.login) throw new Error(d.error||'Échec démo');
+    toast('Données démo chargées (fictives)','success');
+    const email=(d.login&&d.login.email)||'demo@hostpilot.local';
+    const password=(d.login&&d.login.password)||'demo1234';
+    document.getElementById('email')&&(document.getElementById('email').value=email);
+    document.getElementById('password')&&(document.getElementById('password').value=password);
+    S.demoMode=true;
+    // auto login
+    const body=JSON.stringify({email,password});
+    const res=await api('/api/auth/login',{method:'POST',body});
+    S.token=res.token; localStorage.setItem('hp_token',res.token);
+    S.user=res.user; S.org=res.organization||res.org;
+    S.demoMode=true; S.page='dashboard';
+    await loadAll(); render();
+  }catch(e){toast(e.message||String(e),'error')}
+}
+async function resetDemo(){
+  if(!confirm('Réinitialiser toutes les données de démonstration ?')) return;
+  try{
+    await fetch('/api/demo/reset',{method:'POST'});
+    localStorage.removeItem('hp_token');
+    S.token=''; S.demoMode=true;
+    toast('Démo réinitialisée — reconnectez-vous','success');
+    S.page='auth'; render();
+  }catch(e){toast(e.message,'error')}
+}
+
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function toast(msg,type='info'){
+  const el=document.createElement('div');
+  const c={info:'bg-slate-800',success:'bg-green-600',error:'bg-red-600',warn:'bg-amber-500'};
+  el.className=`toast ${c[type]||c.info} text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium`;
+  el.textContent=msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300)},3200);
+}
+
+async function api(path,opts={}){
+  const headers={'Content-Type':'application/json',...(opts.headers||{})};
+  if(S.token) headers.Authorization='Bearer '+S.token;
+  const res=await fetch(API+path,{...opts,headers});
+  const data=await res.json().catch(()=>({}));
+  if(res.status===401 && !path.includes('/auth/login') && !path.includes('/auth/register')){
+    S.token=null;S.user=null;localStorage.removeItem('hp_token');S.page='auth';render();
+    throw new Error(data.error||'Session expirée');
+  }
+  if(!res.ok) throw new Error(data.error||data.message||('Erreur '+res.status));
+  return data;
+}
+
+async function loadAll(){ /* demo flag refreshed after */
+{
+  S.loading=true;S.error=null;render();
+  try{
+    const me=await api('/api/auth/me');
+    S.user=me.user;S.org=me.organization;
+    const [props,resas,clean,incs,autos,runs,jobs,convs,notifs,unread,prefs,billing,plans,stats,cal,sys,pricing,revs,revStats,integ]=await Promise.all([
+      api('/api/properties'),api('/api/reservations'),api('/api/cleaning'),
+      api('/api/incidents'),api('/api/automations'),api('/api/automations/runs'),api('/api/automations/jobs'),api('/api/conversations'),api('/api/notifications'),api('/api/notifications/unread-count'),api('/api/notification-preferences'),api('/api/billing/subscription'),api('/api/billing/plans'),api('/api/dashboard?period='+(S.dashPeriod||'month')),api('/api/calendar'),api('/api/system/status'),api('/api/pricing/overview'),api('/api/reviews'),api('/api/reviews/stats'),api('/api/integrations')
+    ]);
+    S.properties=props.properties||[];
+    S.reservations=resas.reservations||[];
+    S.cleaning=clean.tasks||[];
+    S.incidents=incs.incidents||[];
+    S.automations=autos.automations||[];
+    S.automationRuns=runs.runs||[];
+    S.jobs=jobs.jobs||[];
+    S.conversations=convs.conversations||[];
+    S.notifications=notifs.notifications||[];
+    S.unreadCount=unread.count||0;
+    S.notifPrefs=prefs;
+    S.billing=billing;
+    S.plans=plans;
+    S.stats=stats;
+    S.dashPeriod=S.dashPeriod||'month';
+    S.calendar=cal;
+    S.systemStatus=sys;
+    S.pricing=pricing;
+    S.reviews=revs;
+    S.reviewStats=revStats;
+    S.integrations=integ.integrations||[];
+    try{
+      const onb=await api('/api/onboarding/status');
+      S.onboarding=onb;
+      if(onb.needs_onboarding && !sessionStorage.getItem('hp_skip_onb')){
+        S.showOnboarding=true;
+        S.onbStep=onb.step||1;
+      }
+    }catch(_){}
+    S.page='dashboard';
+  }catch(e){
+    S.error=e.message;
+    if(!S.token) S.page='auth';
+    toast(e.message,'error');
+  }
+  S.loading=false;render();
+}
+
+async function doRegister(){
+  S.loading=true;render();
+  try{
+    const d=await api('/api/auth/register',{method:'POST',body:JSON.stringify(S.authForm)});
+    S.token=d.token;localStorage.setItem('hp_token',d.token);
+    S.user=d.user;S.org=d.organization;
+    toast('Compte créé','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error');S.loading=false;render()}
+}
+
+async function doLogin(){
+  S.loading=true;render();
+  try{
+    const d=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email:S.authForm.email,password:S.authForm.password})});
+    S.token=d.token;localStorage.setItem('hp_token',d.token);
+    S.user=d.user;S.org=d.organization;
+    toast('Connecté','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error');S.loading=false;render()}
+}
+
+function logout(){
+  S.token=null;S.user=null;S.org=null;localStorage.removeItem('hp_token');
+  S.properties=[];S.reservations=[];S.stats=null;S.page='auth';render();
+  toast('Déconnecté','info');
+}
+
+function nav(p){S.page=p;S.showAddProp=S.showAddRes=S.showAddInc=false;render()}
+function toggleDark(){S.dark=!S.dark;document.documentElement.classList.toggle('dark',S.dark);localStorage.setItem('hp-dark',S.dark?'1':'0');render()}
+
+async function addProperty(){
+  const name=document.getElementById('p-name')?.value?.trim();
+  const address=document.getElementById('p-addr')?.value?.trim();
+  if(!name||!address) return toast('Nom et adresse requis','warn');
+  try{
+    await api('/api/properties',{method:'POST',body:JSON.stringify({
+      name,address,
+      wifi_name:document.getElementById('p-wifi')?.value||null,
+      entry_code:document.getElementById('p-code')?.value||null
+    })});
+    toast('Logement enregistré sur le serveur','success');
+    S.showAddProp=false;await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function deleteProperty(id){
+  if(!confirm('Supprimer ce logement ?')) return;
+  try{await api('/api/properties/'+id,{method:'DELETE'});toast('Supprimé','success');await loadAll()}
+  catch(e){toast(e.message,'error')}
+}
+
+async function addReservation(){
+  const property_id=document.getElementById('r-prop')?.value;
+  const guest_name=document.getElementById('r-guest')?.value?.trim();
+  const check_in=document.getElementById('r-in')?.value;
+  const check_out=document.getElementById('r-out')?.value;
+  const total_amount=parseFloat(document.getElementById('r-amount')?.value)||0;
+  if(!property_id||!guest_name||!check_in||!check_out) return toast('Champs requis manquants','warn');
+  try{
+    await api('/api/reservations',{method:'POST',body:JSON.stringify({property_id,guest_name,check_in,check_out,total_amount,platform:'direct'})});
+    toast('Réservation créée','success');S.showAddRes=false;await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function addIncident(){
+  const property_id=document.getElementById('i-prop')?.value;
+  const title=document.getElementById('i-title')?.value?.trim();
+  const severity=document.getElementById('i-sev')?.value||'low';
+  if(!property_id||!title) return toast('Champs requis','warn');
+  try{
+    await api('/api/incidents',{method:'POST',body:JSON.stringify({property_id,title,description:document.getElementById('i-desc')?.value,severity})});
+    toast('Incident créé','success');S.showAddInc=false;await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function resolveIncident(id){
+  try{await api('/api/incidents/'+id,{method:'PATCH',body:JSON.stringify({status:'resolved'})});toast('Résolu','success');await loadAll()}
+  catch(e){toast(e.message,'error')}
+}
+
+async function toggleAuto(id,enabled){
+  try{await api('/api/automations/'+id,{method:'PATCH',body:JSON.stringify({enabled})});await loadAll()}
+  catch(e){toast(e.message,'error')}
+}
+
+async function completeCleaning(id){
+  try{await api('/api/cleaning/'+id,{method:'PATCH',body:JSON.stringify({status:'completed'})});toast('Ménage terminé','success');await loadAll()}
+  catch(e){toast(e.message,'error')}
+}
+
+async function toggleCheck(taskId, itemId, completed){
+  try{
+    await api('/api/cleaning/'+taskId+'/checklist/'+itemId,{
+      method:'PATCH',
+      body:JSON.stringify({completed:!!completed})
+    });
+    const task=(S.cleaning||[]).find(t=>t.id===taskId);
+    if(task&&task.checks){
+      const c=task.checks.find(x=>x.id===itemId);
+      if(c) c.completed=completed?1:0;
+    }
+  }catch(e){toast(e.message,'error')}
+}
+
+async function patchCleaning(id, status){
+  try{
+    await api('/api/cleaning/'+id,{method:'PATCH',body:JSON.stringify({status})});
+    toast(status==='in_progress'?'Ménage commencé':'Statut mis à jour','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function reportCleaningProblem(id){
+  const description=prompt('Décrivez le problème :');
+  if(!description) return;
+  const severity=prompt('Sévérité (low / medium / high / critical) :','medium')||'medium';
+  try{
+    await api('/api/cleaning/'+id+'/problem',{method:'POST',body:JSON.stringify({description,severity,title:'Problème de ménage'})});
+    toast('Problème signalé','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function getCheckinLink(id){
+  try{
+    const d=await api('/api/reservations/'+id+'/checkin-link',{method:'POST',body:'{}'});
+    if(d.checkin_url){
+      await navigator.clipboard.writeText(d.checkin_url).catch(()=>{});
+      toast('Lien check-in copié !','success');
+      prompt('Lien check-in (à envoyer au voyageur) :',d.checkin_url);
+    } else toast(d.message||'Lien généré','success');
+  }catch(e){toast(e.message,'error')}
+}
+
+async function confirmCheckout(id){
+  if(!confirm('Confirmer le check-out ? Une tâche de ménage sera créée.')) return;
+  try{
+    const d=await api('/api/reservations/'+id+'/checkout',{method:'POST',body:'{}'});
+    toast(d.idempotent?'Checkout déjà confirmé':'Checkout confirmé · ménage créé','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+function renderLanding(){
+  const feats=[
+    ['🏠','Logements','Gérez tous vos biens'],
+    ['📅','Réservations','Arrivées et départs'],
+    ['🧹','Ménage','Tâches et checklists'],
+    ['💬','Messages','Réponses voyageurs'],
+    ['⭐','Avis','Réputation'],
+    ['⚡','Automatisations','Workflows auto'],
+    ['💰','Tarification','Recommandations'],
+    ['🔔','Notifications','Alertes in-app'],
+  ];
+  return `<div class="min-h-screen bg-gradient-to-b from-sky-50 to-white dark:from-slate-950 dark:to-slate-900">
+    <div class="max-w-lg mx-auto px-5 pt-12 pb-16">
+      <div class="flex items-center gap-3 mb-8">
+        <div class="w-12 h-12 rounded-2xl bg-brand-600 text-white flex items-center justify-center text-xl font-bold shadow-lg shadow-sky-200">H</div>
+        <div><p class="font-bold text-xl tracking-tight">HostPilot</p><p class="text-xs text-slate-500">Gestion locative automatisée</p></div>
+      </div>
+      <h1 class="text-3xl font-bold leading-tight text-slate-900 dark:text-white">Pilotez vos locations<br><span class="text-brand-600">en toute simplicité</span></h1>
+      <p class="mt-4 text-slate-600 dark:text-slate-400 text-sm leading-relaxed">Réservations, ménage, messages et automatisations — une app claire pour gérer le quotidien de vos séjours courte durée.</p>
+      <div class="grid grid-cols-2 gap-2.5 mt-8">
+        ${feats.map(([ic,t,d])=>`<div class="card p-3.5"><div class="text-xl">${ic}</div><p class="font-semibold text-sm mt-1">${t}</p><p class="text-[11px] text-slate-500 mt-0.5">${d}</p></div>`).join('')}
+      </div>
+      <div class="mt-10 space-y-3">
+        <button class="btn-p w-full py-3.5 text-base" onclick="S.authScreen='form';S.authMode='login';render()">Se connecter</button>
+        <button class="btn-s w-full py-3.5 text-base" onclick="S.authScreen='form';S.authMode='register';render()">Créer un compte</button>
+      </div>
+      <p class="text-center text-[11px] text-slate-400 mt-6">Notifications uniquement dans l’app · Pas de push téléphone</p>
+    </div>
+  </div>`;
+}
+
+function renderAuth(){
+  if(S.authScreen!=='form') return renderLanding();
+  const f=S.authForm;
+  return `<div class="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
+    <div class="card p-8 w-full max-w-md space-y-4 shadow-sm">
+      <button class="text-sm text-slate-500" onclick="S.authScreen='landing';render()">← Accueil</button>
+      <div class="text-center">
+        <div class="w-12 h-12 rounded-xl bg-brand-600 text-white flex items-center justify-center text-xl font-bold mx-auto mb-3">H</div>
+        <h1 class="text-2xl font-bold">HostPilot</h1>
+        <p class="text-sm text-slate-500 mt-1">${S.authMode==='login'?'Connexion':'Créer un compte'}</p>
+      </div>
+      ${S.authMode==='register'?`<input class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-3 text-sm" placeholder="Prénom" value="${esc(f.first_name||'')}" oninput="S.authForm.first_name=this.value">
+      <input class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-3 text-sm" placeholder="Organisation" value="${esc(f.organization_name||'')}" oninput="S.authForm.organization_name=this.value">`:''}
+      <input type="email" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-3 text-sm" placeholder="Email" value="${esc(f.email||'')}" oninput="S.authForm.email=this.value">
+      <input type="password" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-3 text-sm" placeholder="Mot de passe (min 8)" value="${f.password||''}" oninput="S.authForm.password=this.value" onkeydown="if(event.key==='Enter')${S.authMode==='login'?'doLogin()':'doRegister()'}">
+      <button class="btn-p w-full py-3" ${S.loading?'disabled':''} onclick="${S.authMode==='login'?'doLogin()':'doRegister()'}">${S.loading?'…':(S.authMode==='login'?'Se connecter':'Créer mon compte')}</button>
+      ${S.authMode==='login'?`<button type="button" class="btn-s w-full text-sm" onclick="loadDemo()" ${S.loading?'disabled':''}>Compte démo (fictif)</button>`:''}
+      <p class="text-center text-sm text-slate-500">${S.authMode==='login'?`Pas de compte ? <button class="text-brand-600 font-medium" onclick="S.authMode='register';render()">S'inscrire</button>`:`Déjà inscrit ? <button class="text-brand-600 font-medium" onclick="S.authMode='login';render()">Connexion</button>`}</p>
+    </div>
+  </div>`;
+}
+
+function shell(content){
+  const side=[
+    ['dashboard','🏠','Accueil'],
+    ['reservations','📅','Réservations'],
+    ['cleaning','🧹','Ménage'],
+    ['messages','💬','Messages'],
+    ['properties','🏠','Logements'],
+    ['incidents','⚠️','Incidents'],
+    ['automations','⚡','Automations'],
+    ['pricing','💶','Tarifs'],
+    ['reviews','⭐','Avis'],
+    ['calendar','📆','Calendrier'],
+    ['settings','⚙️','Paramètres'],
+  ];
+  const bottom=[
+    ['dashboard','🏠','Accueil'],
+    ['reservations','📅','Résas'],
+    ['cleaning','🧹','Ménage'],
+    ['messages','💬','Msgs'],
+    ['more','☰','Plus'],
+  ];
+  const isMore=['properties','incidents','automations','pricing','reviews','calendar','settings'].includes(S.page);
+  return `<div class="flex h-screen overflow-hidden">
+    <aside class="hidden lg:flex flex-col w-60 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+      <div class="p-5 flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+        <div class="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center font-bold text-sm">H</div>
+        <span class="font-bold text-lg">HostPilot</span>
+        ${(S.demoMode||(S.org&&S.org.is_demo))?`<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">DÉMO</span>`:''}
+      </div>
+      <nav class="flex-1 p-3 space-y-0.5 overflow-y-auto">${side.map(([id,icon,label])=>`
+        <a href="#" onclick="nav('${id}');return false" class="side flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium ${S.page===id?'active':'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}"><span>${icon}</span>${label}</a>`).join('')}
+      </nav>
+      <div class="p-4 border-t border-slate-200 dark:border-slate-800">
+        <p class="text-sm font-medium truncate">${esc(S.user?.first_name||'')}</p>
+        <p class="text-xs text-slate-500 truncate">${esc(S.org?.name||'')}</p>
+        <button onclick="logout()" class="text-xs text-red-500 mt-2">Déconnexion</button>
+      </div>
+    </aside>
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+      <header class="flex items-center justify-between px-4 h-14 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+        <div class="flex items-center gap-2 lg:hidden">
+          <div class="w-7 h-7 rounded-lg bg-brand-600 text-white flex items-center justify-center font-bold text-sm">H</div>
+          <span class="font-bold">HostPilot</span>
+          ${(S.demoMode||(S.org&&S.org.is_demo))?`<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">DÉMO</span>`:''}
+        </div>
+        <div class="hidden lg:block text-sm text-slate-500 truncate max-w-xs">${esc(S.org?.name||'HostPilot')}</div>
+        <div class="flex items-center gap-1 relative">
+          <button onclick="S.showNotifs=!S.showNotifs;S.moreOpen=false;render()" class="relative p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800" title="Notifications in-app">
+            <span class="text-lg">🔔</span>
+            ${S.unreadCount?`<span class="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">${S.unreadCount>99?'99+':S.unreadCount}</span>`:''}
+          </button>
+          <button onclick="toggleDark()" class="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800">🌓</button>
+          ${S.showNotifs?`<div class="absolute right-0 top-12 w-[min(100vw-2rem,22rem)] max-h-[70vh] overflow-y-auto card shadow-xl z-50 p-0">
+            <div class="sticky top-0 bg-white dark:bg-slate-900 flex justify-between items-center p-3 border-b border-slate-200 dark:border-slate-700 z-10">
+              <span class="font-semibold text-sm">Notifications</span>
+              <button class="text-xs text-brand-600 font-medium" onclick="markAllRead()">Tout marquer lu</button>
+            </div>
+            ${(S.notifications||[]).length===0?'<p class="p-4 text-sm text-slate-500">Aucune notification</p>':''}
+            ${(S.notifications||[]).slice(0,40).map(n=>{
+              const nid=esc(n.id);
+              return `<button type="button" onclick="openFromNotifId('${nid}')" class="w-full text-left p-3.5 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 ${n.read?'opacity-55':''}">
+                <div class="flex justify-between gap-2 items-start">
+                  <span class="text-sm font-medium ${n.read?'':'text-slate-900 dark:text-white'}">${esc(n.title)}</span>
+                  ${!n.read?'<span class="w-2 h-2 rounded-full bg-brand-600 shrink-0 mt-1.5"></span>':''}
+                </div>
+                <p class="text-xs text-slate-500 mt-1 line-clamp-2">${esc(n.message||'')}</p>
+                <p class="text-[10px] text-slate-400 mt-1.5">${n.created_at?new Date(n.created_at).toLocaleString('fr-FR'):''} · ${esc(n.type||'')}</p>
+              </button>`;
+            }).join('')}
+          </div>`:''}
+        </div>
+      </header>
+      <main class="flex-1 overflow-y-auto p-4 lg:p-6 pb-24 lg:pb-6">${S.loading?'<p class="text-slate-500 text-sm">Chargement…</p>':content}</main>
+    </div>
+  </div>
+  <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 flex justify-around pt-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] z-40">
+    ${bottom.map(([id,icon,label])=>{
+      const active=id==='more'?isMore:(S.page===id);
+      return `<button type="button" onclick="${id==='more'?"S.moreOpen=!S.moreOpen;S.showNotifs=false;render()":"S.moreOpen=false;nav('"+id+"')"}" class="flex flex-col items-center gap-0.5 px-2 py-1 min-w-[3.5rem] ${active?'text-brand-600':'text-slate-500'}">
+        <span class="text-xl leading-none">${icon}</span>
+        <span class="text-[10px] font-medium">${label}</span>
+      </button>`;
+    }).join('')}
+  </nav>
+  ${S.moreOpen?`<div class="lg:hidden fixed inset-0 z-50" onclick="if(event.target===this){S.moreOpen=false;render()}">
+    <div class="absolute bottom-16 inset-x-3 card shadow-2xl p-2 max-h-[60vh] overflow-y-auto">
+      <p class="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wide">Plus</p>
+      ${[['properties','🏠','Logements'],['incidents','⚠️','Incidents'],['automations','⚡','Automatisations'],['pricing','💶','Tarification'],['reviews','⭐','Avis'],['calendar','📆','Calendrier'],['settings','⚙️','Paramètres']].map(([id,ic,lb])=>`
+        <button type="button" onclick="S.moreOpen=false;nav('${id}')" class="w-full flex items-center gap-3 px-3 py-3.5 rounded-xl text-left text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800 ${S.page===id?'text-brand-600 bg-sky-50 dark:bg-sky-950':''}">
+          <span class="text-lg">${ic}</span>${lb}
+        </button>`).join('')}
+    </div>
+  </div>`:''}`;
+}
+
+async function genPricingRec(propertyId){
+  try{
+    await api('/api/properties/'+propertyId+'/pricing/recommendations',{method:'POST',body:'{}'});
+    toast('Recommandation créée','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function applyPricingRec(propertyId, recId){
+  try{
+    const d=await api('/api/properties/'+propertyId+'/pricing/recommendations/'+recId+'/apply',{method:'POST',body:'{}'});
+    toast(d.message||'Prix appliqué dans HostPilot','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function rejectPricingRec(propertyId, recId){
+  try{
+    await api('/api/properties/'+propertyId+'/pricing/recommendations/'+recId+'/reject',{method:'POST',body:'{}'});
+    toast('Recommandation ignorée','info');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function savePricingRules(propertyId){
+  const body={
+    base_price:Number(document.getElementById('pr-base')?.value),
+    min_price:Number(document.getElementById('pr-min')?.value),
+    max_price:Number(document.getElementById('pr-max')?.value),
+    weekend_pct:Number(document.getElementById('pr-weekend')?.value),
+    auto_apply:document.getElementById('pr-auto')?.checked||false,
+  };
+  try{
+    await api('/api/properties/'+propertyId+'/pricing/rules',{method:'PUT',body:JSON.stringify(body)});
+    toast('Règles enregistrées','success');
+    S.pricingFocus=null;
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function openPricing(propertyId){
+  try{
+    const d=await api('/api/properties/'+propertyId+'/pricing');
+    const recs=await api('/api/properties/'+propertyId+'/pricing/recommendations');
+    const hist=await api('/api/properties/'+propertyId+'/pricing/history');
+    S.pricingFocus={...d, recommendations:recs.recommendations||[], history:hist.history||[]};
+    render();
+  }catch(e){toast(e.message,'error')}
+}
+
+async function addManualReview(){
+  if(!S.properties.length) return toast('Créez un logement d\'abord','warn');
+  const property_id=S.properties[0].id;
+  const rating=Number(prompt('Note 1-5')||'');
+  if(!rating||rating<1||rating>5) return toast('Note invalide','warn');
+  const comment=prompt('Commentaire (optionnel)')||'';
+  try{
+    await api('/api/reviews',{method:'POST',body:JSON.stringify({property_id,rating,comment,platform:'direct',guest_name:'Voyageur'})});
+    toast('Avis enregistré','success');await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function genReviewReply(id){
+  try{
+    const d=await api('/api/reviews/'+id+'/generate-response',{method:'POST',body:'{}'});
+    if(d.blocked) toast(d.reason||'Intervention humaine','warn');
+    else toast('Réponse proposée','success');
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function approveReviewReply(id){
+  try{
+    const d=await api('/api/reviews/'+id+'/approve-response',{method:'POST',body:'{}'});
+    toast(d.message||'Approuvé','success');await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function rejectReviewReply(id){
+  try{await api('/api/reviews/'+id+'/reject-response',{method:'POST',body:'{}'});await loadAll()}
+  catch(e){toast(e.message,'error')}
+}
+async function reviewToIncident(id){
+  try{await api('/api/reviews/'+id+'/create-incident',{method:'POST',body:'{}'});toast('Incident créé','success');await loadAll()}
+  catch(e){toast(e.message,'error')}
+}
+async function syncReviews(){
+  try{await api('/api/reviews/sync',{method:'POST',body:'{}'})}
+  catch(e){toast(e.message,'warn')}
+}
+function renderReviews(){
+  const st=S.reviewStats||{};
+  const list=(S.reviews&&S.reviews.reviews)||[];
+  return `<div class="max-w-5xl mx-auto space-y-5 pb-24">
+    <div class="flex flex-wrap justify-between gap-2 items-center">
+      <div><h1 class="text-2xl font-bold">Avis & Réputation</h1>
+      <p class="text-sm text-slate-500">Analyse · réponses proposées · validation humaine</p></div>
+      <div class="flex gap-2">
+        <button class="btn-s text-sm" onclick="syncReviews()">Synchroniser</button>
+        <button class="btn-p text-sm" onclick="addManualReview()">+ Avis (saisie)</button>
+      </div>
+    </div>
+    <p class="text-xs text-amber-600">${esc(st.platform_sync||S.reviews?.platform_sync||'Configuration requise')}</p>
+    ${st.empty?'<p class="text-sm text-slate-500 card p-4">Aucun avis en base. La sync plateformes nécessite une API officielle. Vous pouvez saisir un avis manuellement pour tester l\'analyse.</p>':''}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="card p-4"><p class="text-xs text-slate-500">Avis</p><p class="text-2xl font-bold">${st.total||0}</p></div>
+      <div class="card p-4"><p class="text-xs text-slate-500">Note moyenne</p><p class="text-2xl font-bold">${st.average_rating!=null?st.average_rating:'—'}</p></div>
+      <div class="card p-4"><p class="text-xs text-slate-500">À répondre</p><p class="text-2xl font-bold text-amber-600">${st.need_response||0}</p></div>
+      <div class="card p-4"><p class="text-xs text-slate-500">Taux de réponse</p><p class="text-2xl font-bold">${st.response_rate||0}%</p></div>
+    </div>
+    ${(st.recurrent_issues||[]).length?`<div class="card p-4 text-sm"><p class="font-semibold mb-1">Sujets récurrents</p>
+      ${st.recurrent_issues.map(t=>`<p class="text-xs">« ${t.topic} » — ${t.count} avis</p>`).join('')}</div>`:''}
+    <div class="space-y-3">
+      ${list.map(r=>`<div class="card p-4 space-y-2">
+        <div class="flex justify-between gap-2">
+          <div><p class="font-medium">${esc(r.property_name||'')} · ${esc(r.platform)} · ${r.rating}/5</p>
+          <p class="text-xs text-slate-500">${esc(r.guest_name||'')} · ${(r.created_at||'').slice(0,10)} · ${esc(r.status)}</p></div>
+          <span class="text-xs px-2 py-1 rounded-full h-fit ${r.analysis?.sentiment==='negatif'?'bg-red-100 text-red-700':r.analysis?.sentiment==='positif'?'bg-green-100 text-green-700':'bg-slate-100'}">${r.analysis?.sentiment||'—'}</span>
+        </div>
+        <p class="text-sm">${r.comment?esc(r.comment):'<em class=\'text-slate-400\'>Sans commentaire</em>'}</p>
+        <p class="text-xs text-slate-500">${r.analysis?.summary||''}</p>
+        ${r.status==='human_required'?`<p class="text-xs text-amber-700 font-medium">⚠️ Intervention humaine recommandée</p>`:''}
+        ${r.proposed_response?`<div class="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 text-sm"><p class="text-xs text-slate-500 mb-1">Réponse proposée</p><p>${r.proposed_response}</p>
+          <div class="flex gap-2 mt-2">
+            <button class="btn-p text-xs" onclick="approveReviewReply('${r.id}')">Approuver</button>
+            <button class="btn-s text-xs" onclick="rejectReviewReply('${r.id}')">Ignorer</button>
+          </div></div>`:''}
+        <div class="flex flex-wrap gap-2">
+          ${!r.proposed_response&&r.status!=='approved_pending_send'?`<button class="btn-s text-xs" onclick="genReviewReply('${r.id}')">Proposer une réponse</button>`:''}
+          <button class="btn-s text-xs" onclick="reviewToIncident('${r.id}')">Créer incident</button>
+        </div>
+        ${r.status==='approved_pending_send'?`<p class="text-xs text-amber-600">Approuvé · envoi plateforme : Configuration requise</p>`:''}
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderPricing(){
+  if(S.pricingFocus){
+    const f=S.pricingFocus;
+    const r=f.rules||{};
+    const m=f.metrics||{};
+    return `<div class="max-w-3xl mx-auto space-y-4 pb-24">
+      <button class="btn-s text-sm" onclick="S.pricingFocus=null;render()">← Tarification</button>
+      <h1 class="text-xl font-bold">${esc(f.property?.name||'')}</h1>
+      <div class="card p-4 grid grid-cols-2 gap-3 text-sm">
+        <div><p class="text-xs text-slate-500">Prix actuel</p><p class="text-xl font-bold">${m.current_price||r.base_price||'—'} €</p></div>
+        <div><p class="text-xs text-slate-500">Recommandé</p><p class="text-xl font-bold text-brand-600">${m.recommended_price||'—'} €</p></div>
+        <div><p class="text-xs text-slate-500">Occupation 14j</p><p class="font-semibold">${m.occupancy_14d??'—'} %</p></div>
+        <div><p class="text-xs text-slate-500">ADR / RevPAR</p><p class="font-semibold">${m.adr||'—'} € / ${m.revpar||'—'} €</p></div>
+        <div><p class="text-xs text-slate-500">Résas à venir</p><p>${m.upcoming_reservations||0}</p></div>
+        <div><p class="text-xs text-slate-500">Revenu prévu</p><p>${m.revenue_expected||0} €</p></div>
+      </div>
+      <div class="card p-4 text-sm"><p class="text-slate-600 dark:text-slate-300">${esc(f.explanation||'')}</p>
+        <p class="text-xs text-amber-600 mt-2">${esc(f.platform_push||'Configuration requise')} pour push plateformes</p></div>
+      <div class="card p-4 space-y-2">
+        <h2 class="font-semibold text-sm">Règles</h2>
+        <div class="grid grid-cols-2 gap-2">
+          <input id="pr-base" type="number" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm" value="${r.base_price||100}" placeholder="Base">
+          <input id="pr-min" type="number" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm" value="${r.min_price||60}" placeholder="Min">
+          <input id="pr-max" type="number" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm" value="${r.max_price||250}" placeholder="Max">
+          <input id="pr-weekend" type="number" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm" value="${r.weekend_pct||0}" placeholder="Week-end %">
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="pr-auto" ${r.auto_apply?'checked':''}> Autoriser modifications automatiques (désactivé par défaut)</label>
+        <button class="btn-p text-sm" onclick="savePricingRules('${f.property.id}')">Enregistrer les règles</button>
+      </div>
+      <div class="card p-4 space-y-2">
+        <div class="flex justify-between"><h2 class="font-semibold text-sm">Recommandations</h2>
+          <button class="btn-s text-xs" onclick="genPricingRec('${f.property.id}')">Générer</button></div>
+        ${(f.recommendations||[]).filter(x=>x.status==='pending').map(rec=>`<div class="border border-slate-200 dark:border-slate-600 rounded-xl p-3 text-sm">
+          <p>${rec.current_price} € → <strong>${rec.recommended_price} €</strong></p>
+          <p class="text-xs text-slate-500 mt-1">${esc(rec.reason||'')}</p>
+          <div class="flex gap-2 mt-2">
+            <button class="btn-p text-xs" onclick="applyPricingRec('${f.property.id}','${rec.id}')">Appliquer</button>
+            <button class="btn-s text-xs" onclick="rejectPricingRec('${f.property.id}','${rec.id}')">Ignorer</button>
+          </div>
+        </div>`).join('')||'<p class="text-xs text-slate-500">Aucune en attente</p>'}
+      </div>
+      <div class="card p-4"><h2 class="font-semibold text-sm mb-2">Historique</h2>
+        ${(f.history||[]).length===0?'<p class="text-xs text-slate-500">Aucun historique</p>':
+          f.history.map(h=>`<p class="text-xs py-1 border-b border-slate-100 dark:border-slate-700">${(h.created_at||'').slice(0,16)} · ${h.old_price} € → ${h.new_price} € · ${esc(h.reason||'')} · sync: ${h.platform_sync||'—'}</p>`).join('')}
+      </div>
+    </div>`;
+  }
+  const ov=S.pricing||{};
+  const list=ov.properties||[];
+  const sum=ov.summary||{};
+  return `<div class="max-w-5xl mx-auto space-y-5 pb-24">
+    <h1 class="text-2xl font-bold">Tarification</h1>
+    <p class="text-sm text-slate-500">Revenue management · recommandations serveur · validation humaine</p>
+    <div class="card p-4 grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+      <div><p class="text-xs text-slate-500">Reco. en attente</p><p class="text-xl font-bold">${sum.pending_recommendations||0}</p></div>
+      <div><p class="text-xs text-slate-500">Écart moyen reco.</p><p class="text-xl font-bold">${sum.avg_recommended_delta||0} €</p></div>
+      <div><p class="text-xs text-slate-500">Logements</p><p class="text-xl font-bold">${sum.properties_count||0}</p></div>
+      <div><p class="text-xs text-amber-600">Sync plateformes</p><p class="text-xs">${esc(ov.platform_sync||'Configuration requise')}</p></div>
+    </div>
+    ${list.length===0?'<p class="text-slate-500 text-sm">Créez un logement pour démarrer</p>':''}
+    <div class="grid sm:grid-cols-2 gap-3">
+      ${list.map(i=>`<button onclick="openPricing('${i.property_id}')" class="card p-4 text-left hover:ring-2 hover:ring-brand-500/30">
+        <p class="font-semibold">${esc(i.property_name)}</p>
+        <p class="text-sm mt-1">${i.current_price} € → <span class="text-brand-600 font-medium">${i.recommended_price} €</span></p>
+        <p class="text-xs text-slate-500 mt-1">Occ. 14j ${i.occupancy_14d}% · ADR ${i.adr} € · ${i.pending_recommendations||0} en attente</p>
+      </button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderDashboard(){
+  const s=S.stats||{};
+  const k=s.kpis||{};
+  const today=new Date().toISOString().slice(0,10);
+  const arrivals=(S.reservations||[]).filter(r=>(r.check_in||'').slice(0,10)===today && r.status!=='cancelled').length;
+  const departures=(S.reservations||[]).filter(r=>(r.check_out||'').slice(0,10)===today && r.status!=='cancelled').length;
+  const upcoming=(S.reservations||[]).filter(r=>(r.check_in||'')>today && r.status!=='cancelled').length;
+  const cleanTodo=(S.cleaning||[]).filter(t=>t.status==='pending'||t.status==='assigned').length;
+  const cleanProg=(S.cleaning||[]).filter(t=>t.status==='in_progress').length;
+  const incOpen=(S.incidents||[]).filter(i=>i.status!=='resolved'&&i.status!=='closed').length;
+  const msgNeed=(S.conversations||[]).filter(c=>c.human_controlled||c.status==='needs_attention').length || (S.conversations||[]).length;
+  const revenue=k.revenue!=null?k.revenue:(S.reservations||[]).reduce((a,r)=>a+(Number(r.total_amount)||0),0);
+  const cards=[
+    {label:'Arrivées aujourd\'hui',val:arrivals,page:'reservations',icon:'🛬'},
+    {label:'Départs aujourd\'hui',val:departures,page:'reservations',icon:'🛫'},
+    {label:'Ménages à faire',val:cleanTodo,page:'cleaning',icon:'🧹'},
+    {label:'Ménages en cours',val:cleanProg,page:'cleaning',icon:'⏳'},
+    {label:'Messages',val:msgNeed,page:'messages',icon:'💬'},
+    {label:'Incidents',val:incOpen,page:'incidents',icon:'⚠️'},
+    {label:'Réservations à venir',val:upcoming,page:'reservations',icon:'📅'},
+    {label:'CA (période)',val:(typeof revenue==='number'?Math.round(revenue):revenue)+' €',page:'pricing',icon:'💰'},
+  ];
+  return `<div class="max-w-3xl mx-auto space-y-5 pb-4">
+    ${(S.onboarding&&S.onboarding.needs_onboarding)?`<button class="w-full card p-3.5 text-left text-sm text-brand-600 font-medium" onclick="S.showOnboarding=true;S.onbStep=S.onboarding.step||2;render()">Continuer la configuration (${S.onboarding.percent||0}%)</button>`:''}
+    <div>
+      <h1 class="text-2xl font-bold">Bonjour${S.user?.first_name?', '+esc(S.user.first_name):''}</h1>
+      <p class="text-sm text-slate-500 mt-0.5">${esc(S.org?.name||'')} · vue du jour</p>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      ${cards.map(c=>`<button type="button" onclick="nav('${c.page}')" class="card p-4 text-left active:scale-[0.98] transition hover:border-brand-500/40 hover:shadow-sm">
+        <div class="flex justify-between items-start"><span class="text-xl">${c.icon}</span>
+        <span class="text-2xl font-bold tabular-nums">${c.val}</span></div>
+        <p class="text-xs text-slate-500 mt-2 font-medium">${c.label}</p>
+      </button>`).join('')}
+    </div>
+    ${S.unreadCount?`<button type="button" onclick="S.showNotifs=true;render()" class="w-full card p-4 text-left flex items-center gap-3 border-amber-200 bg-amber-50/80 dark:bg-amber-950/20">
+      <span class="text-xl">🔔</span>
+      <div><p class="font-semibold text-sm">${S.unreadCount} notification${S.unreadCount>1?'s':''} non lue${S.unreadCount>1?'s':''}</p>
+      <p class="text-xs text-slate-500">Appuyez pour ouvrir</p></div>
+    </button>`:''}
+    <div class="card p-4">
+      <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Actions rapides</p>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn-s text-sm" onclick="nav('reservations')">Réservations</button>
+        <button class="btn-s text-sm" onclick="nav('cleaning')">Ménage</button>
+        <button class="btn-s text-sm" onclick="nav('messages')">Messages</button>
+        <button class="btn-s text-sm" onclick="nav('properties')">Logements</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renderCalendar(){
+  const ev=(S.calendar&&S.calendar.events)||[];
+  return `<div class="max-w-5xl mx-auto space-y-5 pb-24">
+    <h1 class="text-2xl font-bold">Calendrier</h1>
+    <p class="text-sm text-slate-500">Réservations · ménage · incidents (données serveur)</p>
+    ${ev.length===0?'<p class="text-slate-500 text-sm">Aucun événement</p>':''}
+    <div class="space-y-2">${ev.map(e=>`<button onclick="nav('${e.type==='cleaning'?'cleaning':e.type==='incident'?'incidents':'reservations'}')" class="card p-3 w-full text-left text-sm flex justify-between gap-2">
+      <span><span class="text-xs uppercase text-slate-400">${e.type}</span> · ${esc(e.title||'')}</span>
+      <span class="text-xs text-slate-500 whitespace-nowrap">${(e.start||'').toString().slice(0,10)}</span>
+    </button>`).join('')}</div>
+  </div>`;
+}
+
+
+function renderProperties(){
+  return `<div class="max-w-5xl mx-auto space-y-5 pb-24">
+    <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Logements</h1><button class="btn-p text-sm" onclick="S.showAddProp=true;render()">+ Ajouter</button></div>
+    ${S.showAddProp?`<div class="card p-5 space-y-3">
+      <input id="p-name" placeholder="Nom *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+      <input id="p-addr" placeholder="Adresse *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+      <div class="grid grid-cols-2 gap-2"><input id="p-wifi" placeholder="Wi-Fi" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm"><input id="p-code" placeholder="Code d'accès" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm"></div>
+      <div class="flex gap-2"><button class="btn-p text-sm" onclick="addProperty()">Enregistrer sur le serveur</button><button class="btn-s text-sm" onclick="S.showAddProp=false;render()">Annuler</button></div>
+    </div>`:''}
+    <div class="grid sm:grid-cols-2 gap-4">
+      ${S.properties.length===0?'<p class="text-slate-500 text-sm col-span-2">Aucun logement en base. Créez-en un — il survivra au rechargement.</p>':''}
+      ${S.properties.map(p=>`<div class="card p-5"><div class="flex justify-between gap-2"><div><p class="font-semibold text-lg">${esc(p.name)}</p><p class="text-sm text-slate-500">${esc(p.address)}</p><p class="text-xs mt-2 text-slate-500">Code ${esc(p.entry_code||'—')} · Wi-Fi ${esc(p.wifi_name||'—')}</p></div><span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 h-fit">${esc(p.status)}</span></div>
+      <button class="btn-s text-xs mt-3" onclick="deleteProperty('${p.id}')">Supprimer</button></div>`).join('')}
+    </div></div>`;
+}
+
+
+function showReservationDetails(id){
+  const r=(S.reservations||[]).find(x=>x.id===id);
+  if(!r) return toast('Réservation introuvable','warn');
+  alert(['Voyageur: '+(r.guest_name||'—'),'Logement: '+(r.property_name||'—'),'Arrivée: '+(r.check_in||'').slice(0,10),'Départ: '+(r.check_out||'').slice(0,10),'Montant: '+(r.total_amount||0)+' €','Statut: '+(r.status||'—'),'Plateforme: '+(r.platform||'—'),r.checkout_confirmed_at?'Checkout: '+(r.checkout_confirmed_at||'').slice(0,19):''].filter(Boolean).join('\n'));
+}
+
+function renderReservations(){
+  return `<div class="max-w-5xl mx-auto space-y-5 pb-24">
+    <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Réservations</h1><button class="btn-p text-sm" onclick="S.showAddRes=true;render()" ${S.properties.length===0?'disabled':''}>+ Ajouter</button></div>
+    ${S.showAddRes?`<div class="card p-5 space-y-3">
+      <select id="r-prop" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">${S.properties.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <input id="r-guest" placeholder="Voyageur *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+      <div class="grid grid-cols-2 gap-2"><input id="r-in" type="date" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm"><input id="r-out" type="date" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm"></div>
+      <input id="r-amount" type="number" placeholder="Montant €" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+      <div class="flex gap-2"><button class="btn-p text-sm" onclick="addReservation()">Créer</button><button class="btn-s text-sm" onclick="S.showAddRes=false;render()">Annuler</button></div>
+    </div>`:''}
+    <div class="card overflow-hidden"><table class="w-full text-sm"><thead class="bg-slate-50 dark:bg-slate-800/50 text-left"><tr><th class="p-3">Voyageur</th><th class="p-3 hidden sm:table-cell">Logement</th><th class="p-3">Dates</th><th class="p-3">Montant</th><th class="p-3">Statut</th><th class="p-3">Actions</th></tr></thead>
+    <tbody>${S.reservations.length===0?'<tr><td colspan="6" class="p-6 text-center text-slate-500">Aucune réservation en base</td></tr>':S.reservations.map(r=>`<tr class="border-t border-slate-100 dark:border-slate-700"><td class="p-3 font-medium">${esc(r.guest_name||'—')}</td><td class="p-3 hidden sm:table-cell text-slate-500">${esc(r.property_name||'—')}</td><td class="p-3 text-xs">${(r.check_in||'').slice(0,10)} → ${(r.check_out||'').slice(0,10)}</td><td class="p-3">${r.total_amount||0} €</td><td class="p-3"><span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">${esc(r.status)}</span></td><td class="p-3"><div class="flex flex-wrap gap-1"><button class="btn-s text-xs" onclick="showReservationDetails('${r.id}')">Détails</button><button class="btn-s text-xs" onclick="getCheckinLink('${r.id}')">Check-in</button>${r.status!=='completed'&&!r.checkout_confirmed_at?`<button class="btn-p text-xs" onclick="confirmCheckout('${r.id}')">Checkout</button>`:`<span class="text-xs text-slate-400">Checkout OK</span>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function renderCleaning(){
+  const stLabel={pending:'À effectuer',assigned:'Assigné',in_progress:'En cours',completed:'Terminé',problem_reported:'Problème'};
+  const groups=[
+    {key:'todo',title:'À effectuer',filter:t=>t.status==='pending'||t.status==='assigned'},
+    {key:'prog',title:'En cours',filter:t=>t.status==='in_progress'},
+    {key:'done',title:'Terminés',filter:t=>t.status==='completed'||t.status==='validated'},
+    {key:'prob',title:'Problèmes',filter:t=>t.status==='problem_reported'},
+  ];
+  const resaById=Object.fromEntries((S.reservations||[]).map(r=>[r.id,r]));
+  function card(t){
+    const resa=t.reservation_id?resaById[t.reservation_id]:null;
+    const cout=resa&&resa.check_out?String(resa.check_out).slice(0,10):'—';
+    const when=t.scheduled_at?new Date(t.scheduled_at).toLocaleString('fr-FR'):'—';
+    const checks=t.checks||[];
+    return `<div class="card p-4 space-y-3">
+      <div class="flex justify-between gap-2 items-start">
+        <div>
+          <p class="font-semibold">🧹 ${esc(t.property_name||'Logement')}</p>
+          <p class="text-xs text-slate-500 mt-1">Départ : ${esc(cout)} · Prévu : ${esc(when)}</p>
+          ${t.assigned_to?`<p class="text-xs text-slate-500">Assigné</p>`:''}
+        </div>
+        <span class="text-[11px] font-semibold px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 whitespace-nowrap">${esc(stLabel[t.status]||t.status)}</span>
+      </div>
+      ${checks.length?`<div class="space-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2">${checks.map(c=>`
+        <label class="flex items-center gap-2.5 text-sm min-h-[44px]">
+          <input type="checkbox" class="w-5 h-5" ${c.completed?'checked':''} onchange="toggleCheck('${t.id}','${c.id}',this.checked)">
+          <span class="${c.completed?'line-through text-slate-400':''}">${esc(c.title)}</span>
+        </label>`).join('')}</div>`:''}
+      <div class="flex flex-wrap gap-2 pt-1">
+        ${(t.status==='pending'||t.status==='assigned')?`<button class="btn-p text-sm py-2.5 px-4" onclick="patchCleaning('${t.id}','in_progress')">Commencer le ménage</button>`:''}
+        ${t.status==='in_progress'?`<button class="btn-p text-sm py-2.5 px-4" onclick="completeCleaning('${t.id}')">Terminer le ménage</button>`:''}
+        ${t.status!=='completed'&&t.status!=='validated'?`<button class="btn-s text-sm py-2.5 px-4" onclick="reportCleaningProblem('${t.id}')">Signaler un problème</button>`:''}
+      </div>
+    </div>`;
+  }
+  return `<div class="max-w-3xl mx-auto space-y-6 pb-4">
+    <div><h1 class="text-2xl font-bold">Ménage</h1>
+    <p class="text-sm text-slate-500">Tâches liées aux check-out · données serveur</p></div>
+    ${S.cleaning.length===0?'<p class="text-slate-500 text-sm card p-4">Aucune tâche. Confirmez un check-out sur une réservation pour en créer une.</p>':''}
+    ${groups.map(g=>{
+      const list=(S.cleaning||[]).filter(g.filter);
+      if(!list.length) return '';
+      return `<section><h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">${g.title} (${list.length})</h2>
+        <div class="space-y-3">${list.map(card).join('')}</div></section>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderIncidents(){
+  return `<div class="max-w-4xl mx-auto space-y-5 pb-24">
+    <div class="flex justify-between"><h1 class="text-2xl font-bold">Incidents</h1><button class="btn-p text-sm" onclick="S.showAddInc=true;render()" ${S.properties.length===0?'disabled':''}>+ Signalement</button></div>
+    ${S.showAddInc?`<div class="card p-5 space-y-3">
+      <select id="i-prop" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">${S.properties.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <input id="i-title" placeholder="Titre *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+      <select id="i-sev" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm"><option value="low">Faible</option><option value="medium">Moyen</option><option value="high">Élevé</option><option value="critical">Critique</option></select>
+      <textarea id="i-desc" rows="2" placeholder="Description" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm"></textarea>
+      <div class="flex gap-2"><button class="btn-p text-sm" onclick="addIncident()">Créer</button><button class="btn-s text-sm" onclick="S.showAddInc=false;render()">Annuler</button></div>
+    </div>`:''}
+    ${S.incidents.length===0?'<p class="text-slate-500 text-sm">Aucun incident</p>':S.incidents.map(i=>`<div class="card p-5 ${i.status==='resolved'?'opacity-60':''}"><p class="font-medium">${esc(i.title)}</p><p class="text-sm text-slate-500">${esc(i.property_name||'')} · ${esc(i.severity)} · ${esc(i.status)}</p>${i.status!=='resolved'?`<button class="btn-s text-xs mt-3" onclick="resolveIncident('${i.id}')">Résoudre</button>`:''}</div>`).join('')}</div>`;
+}
+
+function renderMessages(){
+  if(S.activeConv){
+    const c=S.activeConv;
+    return `<div class="max-w-3xl mx-auto space-y-4 pb-24">
+      <div class="flex items-center gap-3">
+        <button class="btn-s text-sm" onclick="S.activeConv=null;S.messages=[];render()">←</button>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold truncate">${esc(c.guest_name||'Voyageur')}</p>
+          <p class="text-xs text-slate-500">${esc(c.property_name||'')} · ${c.human_controlled?'👤 Humain':(c.ai_enabled?'🤖 IA active':'IA off')} · ${esc(c.status||'')}</p>
+        </div>
+        ${c.human_controlled
+          ? `<button class="btn-s text-xs" onclick="takeControl('${c.id}',false)">Réactiver l'IA</button>`
+          : `<button class="btn-p text-xs" onclick="takeControl('${c.id}',true)">Prendre le contrôle</button>`}
+      </div>
+      <div class="card p-4 space-y-3 max-h-[50vh] overflow-y-auto">
+        ${(S.messages||[]).map(m=>`<div class="flex ${m.sender_type==='guest'?'justify-start':'justify-end'}">
+          <div class="max-w-[85%] rounded-2xl px-3 py-2 text-sm ${m.sender_type==='guest'?'bg-slate-100 dark:bg-slate-700':m.sender_type==='ai'?'bg-brand-50 dark:bg-brand-900/30 text-brand-900 dark:text-brand-100':'bg-brand-600 text-white'}">
+            <p class="text-[10px] opacity-60 mb-0.5">${m.sender_type} · ${m.delivery_status||''}</p>
+            <p>${esc(m.content)}</p>
+            ${m.delivery_note?`<p class="text-[10px] mt-1 opacity-70">${m.delivery_note}</p>`:''}
+          </div></div>`).join('')||'<p class="text-sm text-slate-500">Aucun message</p>'}
+      </div>
+      <div class="card p-3 space-y-2">
+        <div class="flex gap-2"><input id="msg-input" placeholder="Réponse hôte…" class="flex-1 rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm" onkeydown="if(event.key==='Enter')sendHostMessage()"><button class="btn-p text-sm" onclick="sendHostMessage()">Envoyer</button></div>
+        <div class="flex gap-2"><input id="msg-guest" placeholder="Simuler message voyageur (test IA)…" class="flex-1 rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm" onkeydown="if(event.key==='Enter')simulateGuestMessage()"><button class="btn-s text-sm" onclick="simulateGuestMessage()">Test IA</button></div>
+        <p class="text-[10px] text-slate-400">L'IA répond uniquement avec les données du logement. Sinon → escalade humaine. Pas de faux envoi plateforme.</p>
+      </div>
+    </div>`;
+  }
+  return `<div class="max-w-4xl mx-auto space-y-5 pb-24">
+    <h1 class="text-2xl font-bold">Messages</h1>
+    <p class="text-sm text-slate-500">Conversations liées aux réservations · IA + prise de contrôle</p>
+    ${(S.conversations||[]).length===0?'<p class="text-slate-500 text-sm">Aucune conversation — créez une réservation d\'abord</p>':''}
+    <div class="space-y-2">
+      ${(S.conversations||[]).map(c=>`<button onclick="openConversation('${c.id}')" class="card p-4 w-full text-left hover:ring-2 hover:ring-brand-500/30">
+        <div class="flex justify-between gap-2">
+          <div class="min-w-0"><p class="font-medium truncate">${esc(c.guest_name||'Voyageur')}</p>
+          <p class="text-xs text-slate-500 truncate">${esc(c.property_name||'')}</p>
+          <p class="text-sm text-slate-600 dark:text-slate-300 truncate mt-1">${esc(c.last_message||'—')}</p></div>
+          <div class="text-right shrink-0 space-y-1">
+            ${c.status==='intervention_required'||c.status==='human_control'?`<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Intervention</span>`:''}
+            <p class="text-[10px] text-slate-400">${c.human_controlled?'👤':'🤖'}</p>
+          </div>
+        </div>
+      </button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderAutomations(){
+  return `<div class="max-w-4xl mx-auto space-y-5 pb-24">
+    <h1 class="text-2xl font-bold">Automatisations</h1>
+    <p class="text-sm text-slate-500">Moteur serveur · ÉVÉNEMENT → CONDITIONS → ACTIONS → JOBS → HISTORIQUE</p>
+    <div class="space-y-3">
+      ${S.automations.map(a=>`<div class="card p-4 flex items-center justify-between gap-3">
+        <div class="min-w-0"><p class="font-medium text-sm truncate">${esc(a.name)}</p>
+        <p class="text-xs text-slate-500">${a.event_type}</p></div>
+        <button onclick="toggleAuto('${a.id}',${a.enabled?0:1})" class="w-11 h-6 rounded-full relative shrink-0 ${a.enabled?'bg-brand-600':'bg-slate-300'}">
+          <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${a.enabled?'translate-x-5':''}"></span>
+        </button>
+      </div>`).join('')||'<p class="text-slate-500 text-sm">Aucune automatisation</p>'}
+    </div>
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3">Historique d'exécution</h2>
+      ${(S.automationRuns||[]).length===0?'<p class="text-sm text-slate-500">Aucune exécution encore — créez une réservation pour déclencher RESERVATION_CREATED</p>':''}
+      <div class="space-y-2 max-h-64 overflow-y-auto">
+        ${(S.automationRuns||[]).map(r=>`<div class="text-sm border-b border-slate-100 dark:border-slate-700 pb-2">
+          <div class="flex justify-between gap-2"><span class="font-medium">${r.trigger_event}</span>
+          <span class="text-xs ${r.status==='completed'?'text-green-600':r.status==='failed'?'text-red-600':'text-amber-600'}">${r.status==='completed'?'✓':r.status==='failed'?'✕':r.status}</span></div>
+          <p class="text-xs text-slate-500">${r.started_at?new Date(r.started_at).toLocaleString('fr-FR'):''}</p>
+          ${(r.action_results||[]).map(a=>`<p class="text-xs mt-0.5">${a.status==='completed'?'✓':a.status==='failed'?'✕':'•'} ${a.action_type||''} ${esc(a.detail||a.error||'')}</p>`).join('')}
+          ${r.error_message?`<p class="text-xs text-red-500">${esc(r.error_message)}</p>`:''}
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="card p-5">
+      <h2 class="font-semibold mb-3">Jobs planifiés (serveur)</h2>
+      ${(S.jobs||[]).length===0?'<p class="text-sm text-slate-500">Aucun job en attente</p>':''}
+      ${(S.jobs||[]).slice(0,20).map(j=>`<div class="text-xs flex justify-between py-1 border-b border-slate-100 dark:border-slate-700">
+        <span>${esc(j.status)} · ${j.run_at?new Date(j.run_at).toLocaleString('fr-FR'):''}</span>
+        <span class="text-slate-500">${esc(j.error_message||(j.result&&j.result.slice(0,40))||'')}</span>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderSettings(){
+  const demoBlock=`<div class="card p-4 border border-amber-200 bg-amber-50 dark:bg-amber-950/30">
+    <p class="text-sm font-medium text-amber-900 dark:text-amber-100">Mode démonstration</p>
+    <p class="text-xs text-amber-800 dark:text-amber-200 mt-1">Données 100 % fictives. Les intégrations Airbnb/Booking/Stripe ne sont pas connectées.</p>
+    <button class="btn-s text-xs mt-3" onclick="resetDemo()">Réinitialiser les données démo</button>
+  </div>`;
+  const statusLabel = (s) => ({
+    connected: 'Connecté',
+    disconnected: 'Non connecté',
+    configuration_required: 'Configuration requise',
+    error: 'Erreur',
+    pending_oauth: 'OAuth en cours'
+  }[s] || s);
+  const statusClass = (s) => ({
+    connected: 'bg-green-100 text-green-700',
+    configuration_required: 'bg-amber-100 text-amber-800',
+    error: 'bg-red-100 text-red-700',
+    disconnected: 'bg-slate-100 text-slate-600',
+    pending_oauth: 'bg-blue-100 text-blue-700'
+  }[s] || 'bg-slate-100');
+  return `<div class="max-w-3xl mx-auto space-y-5 pb-24"><h1 class="text-2xl font-bold">Paramètres</h1>${demoBlock}
+  <div class="card p-5 space-y-2"><h2 class="font-semibold">Compte</h2><p class="text-sm">${S.user?.email}</p><p class="text-sm">Org : <strong>${esc(S.org?.name)}</strong> · ${S.org?.plan}</p><button class="btn-s text-sm" onclick="logout()">Déconnexion</button></div>
+  <div class="card p-5 space-y-4">
+    <div><h2 class="font-semibold">Intégrations</h2>
+    <p class="text-xs text-slate-500 mt-1">OAuth officiel uniquement · jamais de mot de passe plateforme · pas de scraping</p></div>
+    ${(S.integrations||[]).map(i=>`<div class="border border-slate-200 dark:border-slate-600 rounded-xl p-4 space-y-2">
+      <div class="flex justify-between items-start gap-2">
+        <div><p class="font-medium capitalize">${esc(i.name||i.platform)}</p>
+        <p class="text-xs text-slate-500 mt-0.5">${esc(i.message||'')}</p>
+        ${i.last_sync_at?`<p class="text-xs text-slate-400 mt-1">Dernière sync : ${new Date(i.last_sync_at).toLocaleString('fr-FR')}</p>`:''}
+        </div>
+        <span class="text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusClass(i.status)}">${statusLabel(i.status)}</span>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-1">
+        ${i.status==='connected'
+          ? `<button class="btn-s text-xs" onclick="syncIntegration('${esc(i.platform)}')">Synchroniser</button>
+             <button class="btn-s text-xs" onclick="disconnectIntegration('${esc(i.platform)}')">Déconnecter</button>`
+          : `<button class="btn-p text-xs" onclick="connectIntegration('${esc(i.platform)}')">${i.canConnect?'Connecter (OAuth)':'Configuration requise'}</button>`
+        }
+        ${i.docs?`<a href="${(i.docs&&String(i.docs).match(/^https?:\/\//i))?esc(i.docs):'#'}" target="_blank" rel="noopener" class="text-xs text-brand-600 self-center">Documentation officielle</a>`:''}
+      </div>
+    </div>`).join('')||'<p class="text-sm text-slate-500">Chargement…</p>'}
+  </div>
+  <div class="card p-5 space-y-3">
+    <h2 class="font-semibold">Abonnement / Facturation</h2>
+    ${(()=>{
+      const b=S.billing||{};
+      const sub=b.subscription||{};
+      const lim=b.limits||{};
+      const use=b.usage||{};
+      return `<p class="text-sm">Plan : <strong>${sub.plan||'—'}</strong> · Statut : <strong>${esc(sub.status||'—')}</strong></p>
+      <p class="text-xs text-slate-500">Logements ${use.properties||0}/${lim.max_properties||'—'} · Automatisations ${use.automations||0}/${lim.max_automations||'—'}</p>
+      ${sub.current_period_end?`<p class="text-xs text-slate-500">Période jusqu'au ${new Date(sub.current_period_end).toLocaleDateString('fr-FR')}</p>`:''}
+      <p class="text-xs ${b.stripe_configured?'text-green-600':'text-amber-600'}">${b.stripe_configured?'Stripe configuré (serveur)':'Configuration requise — clés Stripe TEST côté serveur'}</p>
+      <div class="flex flex-wrap gap-2 mt-2">
+        <button class="btn-p text-xs" onclick="startCheckout('pro')">Choisir Pro</button>
+        <button class="btn-p text-xs" onclick="startCheckout('business')">Choisir Business</button>
+        <button class="btn-s text-xs" onclick="openPortal()">Gérer mon abonnement</button>
+      </div>
+      <div class="mt-3 space-y-1">${(S.plans&&S.plans.plans||[]).map(pl=>`<p class="text-xs text-slate-500"><strong>${esc(pl.name)}</strong> — ${pl.max_properties} logements · checkout ${pl.checkout_available?'dispo':'indisponible'}</p>`).join('')}</div>`;
+    })()}
+  </div>
+  <div class="card p-5 space-y-3">
+    <h2 class="font-semibold">Préférences de notification</h2>
+    <p class="text-xs text-slate-500">In-app · Email: ${(S.notifPrefs&&S.notifPrefs.channels&&S.notifPrefs.channels.email)||'Configuration requise'} · Push: ${(S.notifPrefs&&S.notifPrefs.channels&&S.notifPrefs.channels.push)||'Configuration requise'}</p>
+    ${['reservation','message','cleaning','incident','checkin','checkout','automation','integration'].map(c=>{
+      const on=!(S.notifPrefs&&S.notifPrefs.preferences&&S.notifPrefs.preferences.categories&&S.notifPrefs.preferences.categories[c]===false);
+      return `<label class="flex items-center gap-2 text-sm"><input type="checkbox" data-pref="${c}" ${on?'checked':''}> ${c}</label>`;
+    }).join('')}
+    <button class="btn-p text-sm" onclick="saveNotifPrefs()">Enregistrer</button>
+  </div>
+  <div class="card p-5"><button class="btn-s text-sm" onclick="toggleDark()">Mode sombre / clair</button><p class="text-xs text-slate-400 mt-3">Tokens OAuth stockés côté serveur uniquement</p></div></div>`;
+}
+
+
+async function connectIntegration(platform){
+  try{
+    const d=await api('/api/integrations/'+platform+'/connect',{method:'POST',body:'{}'});
+    if(d.authUrl){ toast('Redirection OAuth officielle…','info'); window.location.href=d.authUrl; }
+    else toast(d.message||'OK','info');
+  }catch(e){ toast(e.message,'warn'); }
+}
+async function disconnectIntegration(platform){
+  if(!confirm('Déconnecter '+platform+' ?')) return;
+  try{ await api('/api/integrations/'+platform+'/disconnect',{method:'POST',body:'{}'}); toast('Déconnecté','success'); await loadAll(); }
+  catch(e){ toast(e.message,'error'); }
+}
+async function syncIntegration(platform){
+  try{ const d=await api('/api/integrations/'+platform+'/sync',{method:'POST',body:'{}'}); toast(d.message||'Sync terminée', d.synced?'success':'info'); await loadAll(); }
+  catch(e){ toast(e.message,'warn'); }
+}
+
+
+async function openConversation(id){
+  try{
+    const d=await api('/api/conversations/'+id+'/messages');
+    S.activeConv=d.conversation;
+    S.messages=d.messages||[];
+    S.page='messages';
+    render();
+  }catch(e){toast(e.message,'error')}
+}
+async function takeControl(id, on){
+  try{
+    await api('/api/conversations/'+id,{method:'PATCH',body:JSON.stringify({human_controlled:!!on})});
+    toast(on?'Contrôle humain actif':'IA réactivée','success');
+    await openConversation(id);
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+async function sendHostMessage(){
+  const input=document.getElementById('msg-input');
+  const content=input?.value?.trim();
+  if(!content||!S.activeConv) return;
+  try{
+    await api('/api/conversations/'+S.activeConv.id+'/messages',{method:'POST',body:JSON.stringify({content,as_host:true,sender_type:'human'})});
+    input.value='';
+    await openConversation(S.activeConv.id);
+  }catch(e){toast(e.message,'error')}
+}
+async function simulateGuestMessage(){
+  const input=document.getElementById('msg-guest');
+  const content=input?.value?.trim();
+  if(!content||!S.activeConv) return;
+  try{
+    const d=await api('/api/conversations/'+S.activeConv.id+'/messages',{method:'POST',body:JSON.stringify({content,channel:'internal'})});
+    if(d.escalated) toast('Escalade: '+(d.reason||'intervention'),'warn');
+    else if(d.reply) toast('Réponse IA générée','success');
+    input.value='';
+    await openConversation(S.activeConv.id);
+    await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+
+async function markRead(id){
+  try{await api('/api/notifications/'+id+'/read',{method:'PUT',body:'{}'});await refreshNotifs()}catch(e){toast(e.message,'error')}
+}
+async function markAllRead(){
+  try{await api('/api/notifications/read-all',{method:'POST',body:'{}'});toast('Tout lu','success');await refreshNotifs()}catch(e){toast(e.message,'error')}
+}
+async function refreshNotifs(){
+  try{
+    const [n,u]=await Promise.all([api('/api/notifications'),api('/api/notifications/unread-count')]);
+    S.notifications=n.notifications||[];S.unreadCount=u.count||0;render();
+  }catch(e){}
+}
+function openFromNotifId(id){
+  const n=(S.notifications||[]).find(x=>x.id===id);
+  if(n) openFromNotif(n);
+}
+function openFromNotif(n){
+  if(!n) return;
+  markRead(n.id);
+  S.showNotifs=false; S.moreOpen=false;
+  if(n.related_incident_id){nav('incidents');return}
+  if(n.related_cleaning_task_id){nav('cleaning');return}
+  if(n.related_conversation_id){S.activeConv=n.related_conversation_id;nav('messages');return}
+  if(n.related_reservation_id){nav('reservations');return}
+  if(n.type==='reservation'||n.type==='checkin'||n.type==='checkout'){nav('reservations');return}
+  if(n.type==='cleaning'){nav('cleaning');return}
+  if(n.type==='incident'){nav('incidents');return}
+  if(n.type==='message'){nav('messages');return}
+  render();
+}
+async function saveNotifPrefs(){
+  const cats={};
+  document.querySelectorAll('[data-pref]').forEach(el=>{cats[el.getAttribute('data-pref')]=el.checked});
+  try{
+    await api('/api/notification-preferences',{method:'PUT',body:JSON.stringify({categories:cats})});
+    toast('Préférences enregistrées','success');await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+
+
+async function startCheckout(plan){
+  try{
+    const d=await api('/api/billing/create-checkout-session',{method:'POST',body:JSON.stringify({plan})});
+    if(d.url){ window.location.href=d.url; }
+    else toast(d.message||'OK','info');
+  }catch(e){ toast(e.message,'warn'); }
+}
+async function openPortal(){
+  try{
+    const d=await api('/api/billing/create-portal-session',{method:'POST',body:'{}'});
+    if(d.url) window.location.href=d.url;
+    else toast(d.message||'OK','info');
+  }catch(e){ toast(e.message,'warn'); }
+}
+
+
+async function saveOnbOrg(){
+  const name=document.getElementById('onb-org')?.value?.trim();
+  if(!name) return toast('Nom requis','warn');
+  try{
+    await api('/api/onboarding/organization',{method:'POST',body:JSON.stringify({
+      name,
+      country:document.getElementById('onb-country')?.value||'FR',
+      currency:document.getElementById('onb-currency')?.value||'EUR',
+      timezone:document.getElementById('onb-tz')?.value||'Europe/Paris',
+    })});
+    S.onbStep=3; toast('Organisation enregistrée','success');
+    await api('/api/onboarding/step',{method:'POST',body:JSON.stringify({step:3})});
+    render();
+  }catch(e){toast(e.message,'error')}
+}
+async function saveOnbProperty(){
+  const name=document.getElementById('onb-pname')?.value?.trim();
+  const address=document.getElementById('onb-paddr')?.value?.trim();
+  if(!name||!address) return toast('Nom et adresse requis','warn');
+  try{
+    const d=await api('/api/onboarding/property',{method:'POST',body:JSON.stringify({
+      name, address,
+      city:document.getElementById('onb-pcity')?.value,
+      wifi_name:document.getElementById('onb-wifi')?.value,
+      wifi_password:document.getElementById('onb-wifip')?.value,
+      entry_code:document.getElementById('onb-code')?.value,
+      parking_information:document.getElementById('onb-park')?.value,
+      house_rules:document.getElementById('onb-rules')?.value,
+      checkin_time:document.getElementById('onb-cin')?.value||'15h00',
+      checkout_time:document.getElementById('onb-cout')?.value||'11h00',
+      base_price:Number(document.getElementById('onb-price')?.value)||100,
+    })});
+    toast('Logement créé · connaissances '+ (d.knowledge_percent||0)+'%','success');
+    S.onbStep=5;
+    await api('/api/onboarding/step',{method:'POST',body:JSON.stringify({step:5})});
+    render();
+  }catch(e){toast(e.message,'error')}
+}
+async function saveOnbAutos(){
+  const keys=[];
+  document.querySelectorAll('[data-onb-auto]:checked').forEach(el=>keys.push(el.getAttribute('data-onb-auto')));
+  try{
+    await api('/api/onboarding/automations',{method:'POST',body:JSON.stringify({automations:keys})});
+    S.onbStep=8; toast('Automatisations configurées','success');
+    render();
+  }catch(e){toast(e.message,'error')}
+}
+async function saveOnbNotifs(){
+  const categories={};
+  document.querySelectorAll('[data-onb-notif]').forEach(el=>{categories[el.getAttribute('data-onb-notif')]=el.checked});
+  try{
+    await api('/api/onboarding/notifications',{method:'POST',body:JSON.stringify({categories})});
+    S.onbStep=10; toast('Notifications enregistrées','success');
+    const st=await api('/api/onboarding/status'); S.onboarding=st; render();
+  }catch(e){toast(e.message,'error')}
+}
+async function completeOnboarding(){
+  try{
+    await api('/api/onboarding/complete',{method:'POST',body:'{}'});
+    S.showOnboarding=false; sessionStorage.setItem('hp_skip_onb','1');
+    toast('Configuration terminée','success'); await loadAll();
+  }catch(e){toast(e.message,'error')}
+}
+function skipOnboarding(){
+  S.showOnboarding=false;
+  sessionStorage.setItem('hp_skip_onb','1');
+  render();
+}
+function renderOnboarding(){
+  const step=S.onbStep||1;
+  const st=S.onboarding||{};
+  const pct=st.percent||0;
+  return `<div class="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-900">
+    <div class="card p-6 w-full max-w-lg space-y-4">
+      <div class="flex justify-between items-center">
+        <div class="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold">H</div>
+        <button class="text-xs text-slate-500" onclick="skipOnboarding()">Passer</button>
+      </div>
+      <div class="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div class="h-full bg-brand-600 transition-all" style="width:${Math.min(100, step*10)}%"></div>
+      </div>
+      ${step===1?`<div class="space-y-3 text-center py-4">
+        <h1 class="text-2xl font-bold">Bienvenue sur HostPilot 👋</h1>
+        <p class="text-sm text-slate-500">Automatisez la gestion de vos locations courte durée depuis un seul endroit.</p>
+        <button class="btn-p w-full" onclick="S.onbStep=2;render()">Commencer</button>
+      </div>`:''}
+      ${step===2?`<div class="space-y-3">
+        <h2 class="text-xl font-bold">Votre organisation</h2>
+        <input id="onb-org" placeholder="Nom de l'activité *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm" value="${(st.organization&&st.organization.name)||''}">
+        <input id="onb-country" placeholder="Pays" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm" value="FR">
+        <input id="onb-currency" placeholder="Devise" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm" value="EUR">
+        <input id="onb-tz" placeholder="Fuseau" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm" value="Europe/Paris">
+        <button class="btn-p w-full" onclick="saveOnbOrg()">Continuer</button>
+      </div>`:''}
+      ${step===3||step===4?`<div class="space-y-3">
+        <h2 class="text-xl font-bold">Premier logement</h2>
+        <input id="onb-pname" placeholder="Nom *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+        <input id="onb-paddr" placeholder="Adresse *" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+        <input id="onb-pcity" placeholder="Ville" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2.5 text-sm">
+        <div class="grid grid-cols-2 gap-2">
+          <input id="onb-wifi" placeholder="Wi-Fi" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+          <input id="onb-wifip" placeholder="Mot de passe Wi-Fi" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+          <input id="onb-code" placeholder="Code d'accès" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+          <input id="onb-price" type="number" placeholder="Prix de base €" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+          <input id="onb-cin" placeholder="Check-in" value="15h00" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+          <input id="onb-cout" placeholder="Check-out" value="11h00" class="rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+        </div>
+        <input id="onb-park" placeholder="Parking" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm">
+        <textarea id="onb-rules" placeholder="Règles du logement" rows="2" class="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-transparent px-3 py-2 text-sm"></textarea>
+        <button class="btn-p w-full" onclick="saveOnbProperty()">Enregistrer le logement</button>
+      </div>`:''}
+      ${step===5?`<div class="space-y-3">
+        <h2 class="text-xl font-bold">Connectez vos plateformes</h2>
+        <p class="text-xs text-slate-500">OAuth officiel uniquement · jamais de mot de passe plateforme</p>
+        ${['Airbnb','Booking.com','Vrbo'].map(n=>`<div class="border border-slate-200 dark:border-slate-600 rounded-xl p-3 flex justify-between items-center">
+          <div><p class="font-medium text-sm">${n}</p><p class="text-xs text-amber-600">Configuration requise</p></div>
+          <button class="btn-s text-xs" onclick="toast('Configuration requise — credentials OAuth serveur','warn')">Connecter</button>
+        </div>`).join('')}
+        <button class="btn-p w-full" onclick="S.onbStep=7;api('/api/onboarding/step',{method:'POST',body:JSON.stringify({step:7})});render()">Continuer</button>
+      </div>`:''}
+      ${step===7?`<div class="space-y-3">
+        <h2 class="text-xl font-bold">Automatisez</h2>
+        ${[['reservation_confirm','Message nouvelle réservation'],['checkin_link','Générer lien check-in'],['cleaning_on_checkout','Tâche ménage au départ'],['incident_notify','Notification incident']].map(([k,l])=>
+          `<label class="flex items-center gap-2 text-sm"><input type="checkbox" data-onb-auto="${k}" checked> ${l}</label>`).join('')}
+        <button class="btn-p w-full" onclick="saveOnbAutos()">Enregistrer</button>
+      </div>`:''}
+      ${step===8?`<div class="space-y-3">
+        <h2 class="text-xl font-bold">Notifications</h2>
+        ${['reservation','message','incident','cleaning','automation','integration'].map(c=>
+          `<label class="flex items-center gap-2 text-sm"><input type="checkbox" data-onb-notif="${c}" checked> ${c}</label>`).join('')}
+        <p class="text-xs text-slate-500">Email / push : Configuration requise si non branchés</p>
+        <button class="btn-p w-full" onclick="saveOnbNotifs()">Continuer</button>
+      </div>`:''}
+      ${step>=10?`<div class="space-y-3">
+        <h2 class="text-xl font-bold">Votre HostPilot est presque prêt 🚀</h2>
+        <p class="text-sm">Configuration : <strong>${pct}%</strong></p>
+        <div class="space-y-1">${(st.checklist||[]).map(i=>`<p class="text-sm ${i.done?'text-green-600':'text-slate-500'}">${i.done?'✓':'○'} ${i.label}${i.detail?(' ('+esc(i.detail)+')'):''}</p>`).join('')}</div>
+        <button class="btn-p w-full" onclick="completeOnboarding()">Accéder au Dashboard</button>
+        <button class="btn-s w-full text-sm" onclick="skipOnboarding()">Continuer plus tard</button>
+      </div>`:''}
+    </div>
+  </div>`;
+}
+
+function render(){
+  document.documentElement.classList.toggle('dark',S.dark);
+  const root=document.getElementById('root');
+  if(S.page==='boot'){root.innerHTML='<div class="min-h-screen flex items-center justify-center text-slate-500">Connexion au serveur…</div>';return}
+  if(S.page==='auth'||!S.token){root.innerHTML=renderAuth();return}
+  if(S.showOnboarding){root.innerHTML=renderOnboarding();return}
+  let content='';
+  switch(S.page){
+    case'dashboard':content=renderDashboard();break;
+    case'reviews':content=renderReviews();break;
+    case'pricing':content=renderPricing();break;
+    case'calendar':content=renderCalendar();break;
+    case'messages':content=renderMessages();break;
+    case'properties':content=renderProperties();break;
+    case'reservations':content=renderReservations();break;
+    case'cleaning':content=renderCleaning();break;
+    case'incidents':content=renderIncidents();break;
+    case'automations':content=renderAutomations();break;
+    case'settings':content=renderSettings();break;
+    default:content=renderDashboard();
+  }
+  root.innerHTML=shell(content);
+}
+
+(async function boot(){
+  if(API_CONFIG_ERROR){
+    S.page='auth'; S.authScreen='landing'; S.error=API_CONFIG_ERROR; render(); return;
+  }
+
+  if(S.dark) document.documentElement.classList.add('dark');
+  if(S.token){try{await loadAll()}catch{S.page='auth';render()}}
+  else{S.page='auth';S.authScreen='landing';render()}
+})();
+
+</script>
+</body>
+</html>
